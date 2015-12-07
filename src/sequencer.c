@@ -23,7 +23,6 @@
 byte *seq_vector;
 void *seq_publisher;
 pthread_mutex_t seq_mutex;
-pthread_mutex_t msg_mutex;
 
 rep_t reply(req_t req)
 {
@@ -106,19 +105,20 @@ zmsg_t *do_update_message(zmsg_t *msg, bool mark)
 {
 	int ret;
 	bool first;
+	bool record;
 	zframe_t *frame;
 	que_item_t *item;
 	zmsg_t *newmsg = NULL;
-	pthread_mutex_t *mutex = NULL;
-
-	mutex = record_get(node_id, next_seq(node_id), msg, mark, NULL, &first);
-	if (mutex) {
+	
+	get_queue(node_id);
+	record = record_check(node_id, next_seq(node_id), msg, mark, NULL, &first);
+	if (record) {
 		if (!first)
-			goto unlock;
+			goto release;
 		item = (que_item_t *)malloc(sizeof(que_item_t));
 		if (!item) {
 			log_err("no memory");
-			goto unlock;
+			goto release;
 		}
 		memset(item, 0, sizeof(que_item_t));
 		newmsg = zmsg_dup(msg);
@@ -141,25 +141,28 @@ zmsg_t *do_update_message(zmsg_t *msg, bool mark)
 			log_err("failed to update queue");
 			goto out;
 		}
-		update_matrix(node_id, node_id, 1);
-		update_vector();
-		record_put(mutex);
-	} else
-		goto release;
+	} else {
+		if (!first)
+			goto release;
+		else
+			update_seq(node_id);
+	}
+	update_matrix(node_id, node_id, 1);
+	update_vector();
 #ifdef SHOW_VECTOR
 	show_vector("sequencer", node_id, seq_vector);
 #endif
 	frame = zframe_new(seq_vector, vector_size);
 	zmsg_prepend(msg, &frame);
+	put_queue(node_id);
 	return msg;
 out:
 	free(item);
 	if (newmsg)
 		zmsg_destroy(&newmsg);
-unlock:
-	record_put(mutex);
 release:
 	zmsg_destroy(&msg);
+	put_queue(node_id);
 	return NULL;
 }
 
@@ -167,10 +170,8 @@ release:
 zmsg_t *update_message(zmsg_t *msg, bool mark)
 {
 	zmsg_t *ret;
-
-	pthread_mutex_lock(&seq_mutex);
+	
 	ret = do_update_message(msg, mark);
-	pthread_mutex_unlock(&seq_mutex);
 #ifdef SEQUENCER_BALANCE
 	if (mark) {
 		while (need_balance(node_id))
@@ -189,9 +190,9 @@ zmsg_t *check_message(zmsg_t *msg)
 
 void do_send_message(zmsg_t **msg, void *socket)
 {
-	pthread_mutex_lock(&msg_mutex);
+	pthread_mutex_lock(&seq_mutex);
 	zmsg_send(msg, socket);
-	pthread_mutex_unlock(&msg_mutex);
+	pthread_mutex_unlock(&seq_mutex);
 }
 
 
@@ -247,7 +248,6 @@ pthread_t start_sequencer(char *src, char *dest)
 
 	seq_publisher = NULL;
 	pthread_mutex_init(&seq_mutex, NULL);
-	pthread_mutex_init(&msg_mutex, NULL);
 	seq_vector = malloc(vector_size);
 	if (!seq_vector) {
 		log_err("no memory");

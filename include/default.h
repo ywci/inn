@@ -11,7 +11,7 @@
 #define MIXER_BALANCE
 #define SEQUENCER_BALANCE
 
-#define NBIT 4
+#define NBIT 8
 #define NODE_MAX 7 // (NODE_MAX < 32)
 #define ADDR_LEN 16
 #define LEN_DIFF 128

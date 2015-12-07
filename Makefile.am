@@ -1,7 +1,7 @@
 # need this for Doxygen integration
 LIBS = -pthread -L/usr/local/lib -lzmq -lczmq
 AM_CFLAGS = -Wall -g -O2 -I${srcdir}/include
-#AM_CFLAGS = -Wall -g -O0 -I${srcdir}/include -DDEBUG
+# AM_CFLAGS = -Wall -g -O0 -I${srcdir}/include -DDEBUG
 bin_PROGRAMS = inn
 
 inn_SOURCES = src/client.c src/sequencer.c src/mixer.c src/heartbeat.c src/collector.c src/replayer.c \

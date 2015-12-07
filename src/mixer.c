@@ -54,12 +54,6 @@ bool need_balance(int id)
 }
 
 
-inline int update_queue(int id, que_item_t *item)
-{
-	return queue_add_item(&mixer_queues[id], item);
-}
-
-
 inline void update_matrix(int row, int col, int step)
 {
 	mixer_matrix[row][col] += step;
@@ -314,11 +308,12 @@ void add_message(int id, zmsg_t *msg)
 	bool create;
 	int cnt = 0;
 	int pos = 0;
+	bool record;
 	zframe_t *frame;
 	que_item_t *item;
-	pthread_mutex_t *mutex;
 	const unsigned int mask = (1 << NBIT) - 1;
-	
+
+	get_queue(id);
 	frame = zmsg_pop(msg);
 	if (zframe_size(frame) != vector_size) {
 		log_err("invalid message");
@@ -347,14 +342,14 @@ void add_message(int id, zmsg_t *msg)
 	show_matrix(mixer_matrix, nr_nodes, nr_nodes);
 #endif
 	zframe_destroy(&frame);
-	mutex = record_get(id, next_seq(id), msg, true, &create, NULL);
-	if (mutex) {
+	record = record_check(id, next_seq(id), msg, true, &create, NULL);
+	if (record) {
 		zmsg_t *newmsg = NULL;
 		
 		item = (que_item_t *)malloc(sizeof(que_item_t));
 		if (!item) {
 			log_err("no memory");
-			goto unlock;
+			goto release;
 		}
 		memset(item, 0, sizeof(que_item_t));
 		frame = zmsg_first(msg);
@@ -380,21 +375,20 @@ void add_message(int id, zmsg_t *msg)
 				zmsg_destroy(&newmsg);
 			goto out;
 		}
-		record_put(mutex);
 		if (newmsg)
 			forward_message(newmsg);
 	} else {
 		update_seq(id);
 		goto release;
 	}
+	put_queue(id);
 	refresh();
 	return;
 out:
 	free(item);
-unlock:
-	record_put(mutex);
 release:
 	zmsg_destroy(&msg);
+	put_queue(id);
 }
 
 
@@ -590,8 +584,8 @@ void create_mixer()
 
 void insert_message(int id, int seq, zmsg_t *msg)
 {
+	bool record;
 	que_item_t *item;
-	pthread_mutex_t *mutex;
 	zframe_t *frame = zmsg_first(msg);
 	
 	log_debug("%s: id=%d, seq=%d", __func__, id, seq);
@@ -604,21 +598,22 @@ void insert_message(int id, int seq, zmsg_t *msg)
 		log_err("invalid message");
 		return;
 	}
-	
+
+	get_queue(id);
 	if (seq <= get_seq(id))
-		return;
+		goto out;
 	
 	if (seq != next_seq(id)) {
 		log_err("invalid seq");
-		return;
+		goto out;
 	}
 	
 	update_matrix(id, id, 1);
 	update_matrix(node_id, id, 1);
-	mutex = record_get(id, seq, msg, false, NULL, NULL);
-	if (!mutex) {
+	record = record_check(id, seq, msg, false, NULL, NULL);
+	if (!record) {
 		update_seq(id);
-		return;
+		goto out;
 	}
 	
 	item = (que_item_t *)malloc(sizeof(que_item_t));
@@ -634,9 +629,34 @@ void insert_message(int id, int seq, zmsg_t *msg)
 #endif
 	if (update_queue(id, item)) {
 		log_err("failed to update queue");
+		free(item);
 		goto out;
 	}
+	put_queue(id);
 	refresh();
+	return;
 out:
-	record_put(mutex);
+	put_queue(id);
+}
+
+
+inline int update_queue(int id, que_item_t *item)
+{
+	return queue_add_item(&mixer_queues[id], item);
+}
+
+
+inline void get_queue(int id) 
+{
+	pthread_mutex_t *mutex = &mixer_queues[id].mutex;
+
+	pthread_mutex_lock(mutex);
+}
+
+
+void put_queue(int id)
+{
+	pthread_mutex_t *mutex = &mixer_queues[id].mutex;
+
+	pthread_mutex_unlock(mutex);
 }

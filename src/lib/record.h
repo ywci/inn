@@ -32,9 +32,6 @@ int record_get_min(int id);
 int record_get_max(int id);
 void record_update(char *ts);
 zmsg_t *record_find(int id, int seq);
-pthread_mutex_t *record_lock(char *ts);
-void record_put(pthread_mutex_t *mutex);
-void record_unlock(pthread_mutex_t *mutex);
-pthread_mutex_t *record_get(int id, int seq, zmsg_t *msg, bool mark, bool *create, bool *first);
+bool record_check(int id, int seq, zmsg_t *msg, bool mark, bool *create, bool *first);
 
 #endif

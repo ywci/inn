@@ -96,11 +96,12 @@ void record_remove_node(record_tree_t *tree, record_node_t node)
 }
 
 
-pthread_mutex_t *record_get(int id, int seq, zmsg_t *msg, bool mark, bool *create, bool *first)
+bool record_check(int id, int seq, zmsg_t *msg, bool mark, bool *create, bool *first)
 {
 	char *ts;
 	unsigned int n;
 	zframe_t *frame;
+	bool ret = false;
 	record_node_t node;
 	record_tree_t *tree;
 
@@ -112,13 +113,13 @@ pthread_mutex_t *record_get(int id, int seq, zmsg_t *msg, bool mark, bool *creat
 	
 	if (!msg) {
 		log_err("no message");
-		return NULL;
+		return ret;
 	}
 	
 	frame = zmsg_first(msg);
 	if (zframe_size(frame) != TIMESTAMP_SIZE) {
 		log_err("invalid message");
-		return NULL;
+		return ret;
 	}
 	
 	ts = (char *)zframe_data(frame);
@@ -132,7 +133,7 @@ pthread_mutex_t *record_get(int id, int seq, zmsg_t *msg, bool mark, bool *creat
 			*create = true;
 		if (first)
 			*first = true;
-		return &tree->mutex;
+		ret = true;
 	} else {
 		record_t *rec = (record_t *)node->value;
 
@@ -145,21 +146,11 @@ pthread_mutex_t *record_get(int id, int seq, zmsg_t *msg, bool mark, bool *creat
 		if (!rec->expire) {
 			if (!rec->seq[id])
 				rec->seq[id] = seq;
-			return &tree->mutex;
+			ret = true;
 		}
-		
-		if ((rec->bitmap & bitmap_available) == bitmap_available)
-			record_remove_node(tree, node);
-		
-		pthread_mutex_unlock(&tree->mutex);
-		return NULL;
 	}
-}
-
-
-void record_put(pthread_mutex_t *mutex)
-{
-	pthread_mutex_unlock(mutex);
+	pthread_mutex_unlock(&tree->mutex);
+	return ret;	
 }
 
 

@@ -23,6 +23,8 @@ void create_mixer();
 void suspend_mixer();
 int next_seq(int id);
 int check_step(int id);
+void get_queue(int id);
+void put_queue(int id);
 void update_seq(int id);
 void set_active(int id);
 void set_inactive(int id);

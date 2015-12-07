@@ -36,7 +36,6 @@ int queue_add_item(que_t *queue, que_item_t *item)
 {
 	int ret = 0;
 	
-	pthread_mutex_lock(&queue->mutex);
 	if (queue->length < QUEUE_LENGTH) {
 		if (!(queue->flgs & FL_INACTIVE)) {
 			queue->seq += 1;
@@ -49,7 +48,6 @@ int queue_add_item(que_t *queue, que_item_t *item)
 		log_err("queue_%d: no space", queue->id);
 		ret = -1;
 	}
-	pthread_mutex_unlock(&queue->mutex);
 	return ret;
 }
 
@@ -99,12 +97,7 @@ void queue_set_active(que_t *queue)
 
 int queue_get_seq(que_t *queue)
 {
-	int ret;
-	
-	pthread_mutex_lock(&queue->mutex);
-	ret = queue->seq;
-	pthread_mutex_unlock(&queue->mutex);
-	return ret;
+	return queue->seq;
 }
 
 
