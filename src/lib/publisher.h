@@ -8,11 +8,15 @@
 #include "log.h"
 
 typedef struct pub_arg {
-	char src[ADDR_SIZE];
-	char dest[ADDR_SIZE];
-	callback_t callback;
+	int type;
+	int total;
+	bool bypass;
 	sender_t sender;
-	void **publisher;
+	sender_desc_t *desc;
+	callback_t callback;
+	char src[ADDR_SIZE];
+	char addr[ADDR_SIZE];
+	char dest[NODE_MAX][ADDR_SIZE];
 } pub_arg_t;
 
 void *start_publisher(void *ptr);

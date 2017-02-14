@@ -4,14 +4,14 @@
 #include <stdlib.h>
 #include <default.h>
 #include <pthread.h>
-#include "lib/log.h"
-#include "lib/publisher.h" 
-#include "lib/subscriber.h"
+#include "publisher.h"
+#include "subscriber.h"
 #include "replayer.h"
-#include "mixer.h"
+#include "synth.h"
+#include "log.h"
 
-#define COLL_FRONTEND_ADDR "ipc:///tmp/inncf"
-#define COLL_BACKEND_ADDR "ipc:///tmp/inncb"
+#define COLLECTOR_BACKEND "ipc:///tmp/inncollectorb"
+#define COLLECTOR_FRONTEND "ipc:///tmp/inncollectorf"
 
 typedef struct coll_arg {
 	int id;
@@ -20,7 +20,7 @@ typedef struct coll_arg {
 	bitmap_t bitmap;
 } coll_arg_t;
 
-void create_collector();
+int create_collector();
 void check_state(coll_arg_t *arg);
 
 #endif

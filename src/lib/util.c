@@ -1,36 +1,84 @@
-/*      util.c
- *      
- *      Copyright (C) 2015 Yi-Wei Ci <ciyiwei@hotmail.com>
- *      
- *      This program is free software; you can redistribute it and/or modify
- *      it under the terms of the GNU General Public License as published by
- *      the Free Software Foundation; either version 2 of the License, or
- *      (at your option) any later version.
- *      
- *      This program is distributed in the hope that it will be useful,
- *      but WITHOUT ANY WARRANTY; without even the implied warranty of
- *      MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *      GNU General Public License for more details.
- *      
- *      You should have received a copy of the GNU General Public License
- *      along with this program; if not, write to the Free Software
- *      Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
- *      MA 02110-1301, USA.
+/* util.c
+ *
+ * Copyright (C) 2015-2017 Yi-Wei Ci
+ *
+ * Distributed under the terms of the MIT license.
  */
 
 #include "util.h"
 
-void forward(void *src, void *dest, callback_t callback, sender_t sender)
+uint32_t hid = 0; // host id
+bool initialize = false;
+unsigned long req_count = 0;
+
+//Multicast Addresses//-------------------------------//
+#define MULTICAST_MAX 254
+#define MULTICAST_NET "224.0.0."
+#if NODE_MAX > MULTICAST_MAX
+#error NODE_MAX > MULTICAST_MAX
+#endif
+//----------------------------------------------------//
+
+int timestamp_compare(char *ts1, char *ts2)
+{
+	return memcmp(ts1, ts2, TIMESTAMP_SIZE);
+}
+
+
+void map_addr(const char *protocol, char *addr, char *orig, int port)
+{
+	int i;
+	char buf[sizeof(struct in_addr)];
+
+	if (!inet_aton(orig, (struct in_addr *)buf)) {
+		log_err("failed to map address %s", orig);
+		return;
+	}
+
+	i = buf[3];
+	if ((i == 0) || (i > MULTICAST_MAX)) {
+		log_err("failed to map address %s", orig);
+		return;
+	}
+
+	if (!strcmp(protocol, "pgm"))
+		sprintf(addr, "pgm://%s;%s%d:%d", inet_ntoa(get_addr()), MULTICAST_NET, i, port);
+	else if (!strcmp(protocol, "epgm"))
+		sprintf(addr, "epgm://%s;%s%d:%d", iface, MULTICAST_NET, i, port);
+	else
+		log_err("failed to map address, invalid protocol %s, addr=%s", protocol, orig);
+}
+
+
+void publish(sender_desc_t *sender, zmsg_t *msg)
+{
+	int i;
+	zmsg_t *dup;
+
+	for (i = 0; i < sender->total - 1; i++) {
+		dup = zmsg_dup(msg);
+		zmsg_send(&dup, sender->desc[i]);
+	}
+
+	zmsg_send(&msg, sender->desc[i]);
+}
+
+
+void forward(void *src, void *dest, callback_t callback, sender_desc_t *sender)
 {
 	while (true) {
 		zmsg_t *msg = zmsg_recv(src);
-		
+
 		if (callback)
 			msg = callback(msg);
+
 		if (msg) {
-			if (sender)
-				sender(&msg, dest);
-			else
+			if (sender) {
+				if (sender->sender)
+					sender->sender(msg);
+				else
+					publish(sender, msg);
+			} else
 				zmsg_send(&msg, dest);
 		}
 	}
@@ -39,9 +87,9 @@ void forward(void *src, void *dest, callback_t callback, sender_t sender)
 
 struct in_addr get_addr()
 {
-	int fd;	
+	int fd;
 	struct ifreq ifr;
-	
+
 	fd = socket(AF_INET, SOCK_DGRAM, 0);
 	ifr.ifr_addr.sa_family = AF_INET;
 	strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
@@ -51,168 +99,14 @@ struct in_addr get_addr()
 }
 
 
-int timestamp_compare(char *ts1, char *ts2)
-{
-	return memcmp(ts1, ts2, TIMESTAMP_SIZE);
-}
-
-
-void extract_timestamp(char *ts, unsigned long *sec, unsigned long *usec, unsigned long *src)
+void extract_timestamp(char *ts, unsigned long *sec, unsigned long *usec, hid_t *src)
 {
 	*src = 0;
 	*sec = 0;
 	*usec = 0;
 	memcpy(sec, ts, 4);
 	memcpy(usec, &ts[4], 3);
-	memcpy(src, &ts[7], 4);
-}
-
-
-void show_timestamp(const char *role, int id, char *ts)
-{
-	unsigned long src;
-	unsigned long sec;
-	unsigned long usec;
-	
-	extract_timestamp(ts, &sec, &usec, &src);
-	if (id >= 0)
-		log_debug("%s_%d: ts=%08lx%05lx.%lx", role, id, sec, usec, src);
-	else
-		log_debug("%s: ts=%08lx%05lx.%lx", role, sec, usec, src);
-}
-
-
-void show_vector(const char *role, int id, byte *vector)
-{
-	int i;
-	int cnt = 0;
-	int pos = 0;
-	char buf[256];
-	char *p = buf;
-	byte val = vector[0];
-	const unsigned int mask = (1 << NBIT) - 1;
-	
-	if (id >= 0)
-		sprintf(buf, "%s_%d: <vector> |", role, id);
-	else
-		sprintf(buf, "%s: <vector> |", role);
-	p += strlen(p);
-	for (i = 0; i < nr_nodes; i++) {
-		if (i != id) {
-			sprintf(p, "%d|", val & mask);
-			cnt += NBIT;
-			if (cnt == 8) {
-				cnt = 0;
-				pos += 1;
-				if (pos < vector_size)
-					val = vector[pos];
-			} else
-				val = val >> NBIT;
-		} else
-			sprintf(p, "0|");
-		p += strlen(p);
-	}
-	log_debug("%s", buf);
-}
-
-
-void show_matrix(int mtx[NODE_MAX][NODE_MAX], int h, int w)
-{
-	int i;
-	int j;
-	char *p;
-	char *buf = (char *)malloc(9 * w + 2);
-	
-	log_debug("[matrix]");
-	for (i = 0; i < h; i++) {
-		strcpy(buf, "|");
-		p = buf + strlen(buf);
-		for (j = 0; j < w; j++) {
-			sprintf(p, "%08d|", mtx[i][j]);
-			p += strlen(p);
-		}
-		log_debug("%s", buf);
-	}
-	free(buf);
-}
-
-
-void show_queue(que_t *queue)
-{
-	const int blank = 256;
-	const int bufsz = 1024;
-	const int item_max = 8;
-	que_item_t *item;
-	char buf[bufsz];
-	char *p = buf;
-	int len = 0;
-	int i = 0;
-	
-	if (list_empty(&queue->head))
-		return;
-	
-	sprintf(p, "queue_%d: ", queue->id);
-	p += strlen(p);
-	list_for_each_entry(item, &queue->head, item) {
-		size_t l;
-		unsigned long src;
-		unsigned long sec;
-		unsigned long usec;
-		int access = (item->flgs & FL_ACCESS) != 0;
-		int visible = (item->flgs & FL_VISIBLE) != 0;
-		
-		extract_timestamp(item->timestamp, &sec, &usec, &src);
-		sprintf(p, "(%d)%08lx%05lx.%lx v=%d a=%d seq=%d ", i, sec, usec, src, visible, access, item->seq);
-		l = strlen(p);
-		len += l;
-		p += l;
-		i++;
-		if ((i == item_max) || (len + blank >= bufsz))
-			break;
-	}
-	log_debug("%s", buf);
-}
-
-
-void show_seq(const char *str, int seq[NODE_MAX])
-{
-	const int bufsz = 1024;
-	const int blank = 256;
-	char buf[bufsz];
-	char *p = buf;
-	int i;
-	
-	if (strlen(str) + blank >= bufsz)
-		return;
-	
-	sprintf(p, "%s: seq=", str);
-	p += strlen(p);
-	for (i = 0; i < nr_nodes; i++) {
-		sprintf(p, "%d ", seq[i]);
-		p += strlen(p);
-	}
-	log_debug("%s", buf);
-}
-
-
-void show_bitmap(const char *str, bitmap_t bitmap)
-{
-	const int bufsz = 1024;
-	const int blank = 256;
-	char buf[bufsz];
-	char *p = buf;
-	int i;
-	
-	if (strlen(str) + blank >= bufsz)
-		return;
-	
-	sprintf(p, "%s: bitmap=|", str);
-	p += strlen(p);
-	for (i = 0; i < nr_nodes; i++) {
-		sprintf(p,"%d|", (bitmap & node_mask[i]) != 0);
-		p += strlen(p);
-	}
-	log_debug("%s", buf);
+	memcpy(src, &ts[7], sizeof(hid_t));
 }
 
 
@@ -231,31 +125,59 @@ void set_timestamp(char *timestamp, struct timeval *tv)
 }
 
 
-void set_timeout(struct timespec *time, int t)
+inline double timediff(timeval_t *start, timeval_t *end)
 {
-	long nsec = (t % 1000000) * 1000;
-	
-	clock_gettime(CLOCK_REALTIME, time);
-	time->tv_sec += t / 1000000;
-	if (time->tv_nsec + nsec >= 1000000000) {
-		time->tv_nsec += nsec - 1000000000;
-		time->tv_sec += 1;
-	} else
-		time->tv_nsec += nsec;
+	if (end->tv_usec < start->tv_usec)
+	 	return end->tv_sec - 1 - start->tv_sec + (1000000 + end->tv_usec - start->tv_usec) / 1000000.0;
+	else
+		return end->tv_sec - start->tv_sec + (end->tv_usec - start->tv_usec) / 1000000.0;
 }
 
 
-void wait_timeout(int t)
+hid_t get_hid()
 {
-	pthread_cond_t cond;
-	struct timespec time;
-	pthread_mutex_t mutex;
+	struct in_addr addr = get_addr();
 
-	pthread_mutex_init(&mutex, NULL);
-	pthread_cond_init(&cond, NULL);
-	set_timeout(&time, t);
+	return (hid_t)addr.s_addr;
+}
 
-	pthread_mutex_lock(&mutex);
-	pthread_cond_timedwait(&cond, &mutex, &time);
-	pthread_mutex_unlock(&mutex);
+
+void evaluate(char *buf, size_t size)
+{
+	static double delay = 0;
+	static timeval_t start_time;
+	hid_t id = ((hid_t *)buf)[0];
+
+	if (!initialize) {
+		hid = get_hid();
+		initialize = true;
+	}
+
+	if (id == hid) {
+		double t;
+		timeval_t now;
+		timeval_t *p = (timeval_t *)&buf[sizeof(hid_t)];
+
+		gettimeofday(&now, NULL);
+		t = timediff(p, &now);
+		delay += t;
+		log_debug("evaluate: size=%zu, count=%lu, t=%fsec", size, req_count, t);
+		req_count++;
+
+		if (1 == req_count)
+			start_time = now;
+
+		if (req_count == nr_requests) {
+			FILE * fp;
+			int rps;
+
+			t = timediff(&start_time, &now);
+			rps = nr_requests / t;
+			delay /= nr_requests;
+			fp = fopen(PATH_LOG, "w");
+			fprintf(fp, "rps: %d\ndelay: %f\n", rps, delay);
+			fclose(fp);
+			log_eval("evaluate: finished, rps=%d, delay=%f", rps, delay);
+		}
+	}
 }

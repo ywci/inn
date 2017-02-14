@@ -18,15 +18,15 @@ struct list_head {
 
 #define LIST_HEAD_INIT(name) { &(name), &(name) }
 
-#define LIST_HEAD(name) \
-	struct list_head name = { &name, &name }
+//#define LIST_HEAD(name) \
+//	struct list_head name = { &name, &name }
 
 #define INIT_LIST_HEAD(ptr) do { \
 	(ptr)->next = (ptr); (ptr)->prev = (ptr); \
 } while (0)
 
 /*
- * Insert a nu entry between two known consecutive entries. 
+ * Insert a nu entry between two known consecutive entries.
  *
  * This is only for internal list manipulation where we know
  * the prev/next entries already!

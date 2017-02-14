@@ -1,46 +1,32 @@
-/*      replayer.c
- *      
- *      Copyright (C) 2015 Yi-Wei Ci <ciyiwei@hotmail.com>
- *      
- *      This program is free software; you can redistribute it and/or modify
- *      it under the terms of the GNU General Public License as published by
- *      the Free Software Foundation; either version 2 of the License, or
- *      (at your option) any later version.
- *      
- *      This program is distributed in the hope that it will be useful,
- *      but WITHOUT ANY WARRANTY; without even the implied warranty of
- *      MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *      GNU General Public License for more details.
- *      
- *      You should have received a copy of the GNU General Public License
- *      along with this program; if not, write to the Free Software
- *      Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
- *      MA 02110-1301, USA.
+/* replayer.c
+ *
+ * Copyright (C) 2015-2017 Yi-Wei Ci
+ *
+ * Distributed under the terms of the MIT license.
  */
 
 #include "replayer.h"
-#include "mixer.h"
 
 void *replay(void *ptr)
 {
 	int ret;
 	void *context = zmq_ctx_new();
 	void *socket = zmq_socket(context, ZMQ_PULL);
-	
-	ret = zmq_bind(socket, REPLAYER_BACKEND_ADDR);
+
+	ret = zmq_bind(socket, REPLAYER_BACKEND);
 	if (ret) {
-		log_err("failed to bind to %s", REPLAYER_BACKEND_ADDR);
+		log_err("failed to bind to %s", REPLAYER_BACKEND);
 		goto out;
 	}
-	
-	while (1) {
+
+	while (true) {
 		zmsg_t *msg = zmsg_recv(socket);
 		zframe_t *frame = zmsg_pop(msg);
-		
+
 		if (zframe_size(frame) == sizeof(replay_arg_t)) {
 			replay_arg_t *arg = (replay_arg_t *)zframe_data(frame);
-			
-			insert_message(arg->id, arg->seq, msg);
+
+			add_message(arg->id, arg->seq, msg);
 		} else {
 			log_err("invalid message");
 			zmsg_destroy(&msg);
@@ -54,74 +40,6 @@ out:
 }
 
 
-void start_replayer()
-{
-	pub_arg_t *arg;
-	pthread_t thread;
-	pthread_attr_t attr;
-	
-	arg = (pub_arg_t *)malloc(sizeof(pub_arg_t));
-	if (!arg) {
-		log_err("no memory");
-		return;
-	}
-	
-	arg->sender = NULL;
-	arg->callback = NULL;
-	arg->publisher = NULL;
-	strcpy(arg->src, REPLAYER_FRONTEND_ADDR);
-	sprintf(arg->dest, "tcp://*:%d", replayer_port);
-	
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
-	pthread_create(&thread, &attr, start_publisher, arg);
-	pthread_attr_destroy(&attr);
-	
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
-	pthread_create(&thread, &attr, replay, NULL);
-	pthread_attr_destroy(&attr);
-}
-
-
-void connect_replayers()
-{
-	int i;
-	int cnt = 0;
-	sub_arg_t *args;
-	pthread_t thread;
-	pthread_attr_t attr;
-	
-	args = (sub_arg_t *)malloc((nr_nodes - 1) * sizeof(sub_arg_t));
-	if (!args) {
-		log_err("no memory");
-		return;
-	}
-	for (i = 0; i < nr_nodes; i++) {
-		if (i != node_id) {
-			sprintf(args[cnt].src, "tcp://%s:%d", nodes[i], replayer_port);
-			strcpy(args[cnt].dest, REPLAYER_BACKEND_ADDR);
-			
-			pthread_attr_init(&attr);
-			pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-			pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
-			pthread_create(&thread, &attr, start_subscriber, &args[cnt]);
-			pthread_attr_destroy(&attr);
-			cnt++;
-		}
-	}
-}
-
-
-void create_replayer()
-{
-	connect_replayers();
-	start_replayer();
-}
-
-
 void send_replay_message(int id, int seq, zmsg_t *msg)
 {
 	int ret;
@@ -130,26 +48,26 @@ void send_replay_message(int id, int seq, zmsg_t *msg)
 	zmsg_t *newmsg;
 	zframe_t *frame;
 	replay_arg_t arg;
-	
+
 	arg.id = id;
 	arg.seq = seq;
 	newmsg = zmsg_dup(msg);
 	if (!newmsg) {
-		log_err("failed to duplicate");
+		log_err("failed to send replay message");
 		return;
 	}
 	context = zmq_ctx_new();
 	socket = zmq_socket(context, ZMQ_PUSH);
 	frame = zframe_new(&arg, sizeof(replay_arg_t));
 	zmsg_prepend(newmsg, &frame);
-	ret = zmq_connect(socket, REPLAYER_FRONTEND_ADDR);
+	ret = zmq_connect(socket, REPLAYER_FRONTEND);
 	if (!ret) {
 		zmsg_send(&newmsg, socket);
 		zmq_close(socket);
 	} else
 		log_err("failed to send replay message");
 	zmq_ctx_destroy(context);
-	log_debug("%s: id=%d, seq=%d", __func__, id, seq);
+	log_func("id=%d, seq=%d", id, seq);
 }
 
 
@@ -157,24 +75,87 @@ void message_replay(int id)
 {
 	int i;
 	zmsg_t *msg;
-	int seq_min = record_get_min(id);
-	int seq_max = record_get_max(id);
-	
+	int seq_min = record_min(id);
+	int seq_max = record_max(id);
+
 	if (seq_max < seq_min) {
 		log_err("invalid records");
 		return;
 	}
-	
+
 	if (!seq_min)
 		return;
-	
-	log_debug("%s: id=%d", __func__, id);
+
+	log_func("id=%d", id);
 	for (i = seq_min; i <= seq_max; i++) {
-		msg = record_find(id, i);
+		msg = record_get_msg(id, i);
 		if (!msg) {
-			log_err("failed to find record");
+			log_err("failed to find record, seq=%d", i);
 			return;
 		}
 		send_replay_message(id, i, msg);
 	}
+}
+
+
+int connect_replayers()
+{
+	int i;
+	int cnt = 0;
+	sub_arg_t *args;
+	pthread_t thread;
+	pthread_attr_t attr;
+
+	args = (sub_arg_t *)malloc((nr_nodes - 1) * sizeof(sub_arg_t));
+	if (!args) {
+		log_err("no memory");
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < nr_nodes; i++) {
+		if (i != node_id) {
+			tcpaddr(args[cnt].src, nodes[i], replayer_port);
+			strcpy(args[cnt].dest, REPLAYER_BACKEND);
+
+			pthread_attr_init(&attr);
+			pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+			pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
+			pthread_create(&thread, &attr, start_subscriber, &args[cnt]);
+			pthread_attr_destroy(&attr);
+			cnt++;
+		}
+	}
+
+	return 0;
+}
+
+
+int create_replayer()
+{
+	pub_arg_t *arg;
+	pthread_t thread;
+	pthread_attr_t attr;
+
+	arg = (pub_arg_t *)calloc(1, sizeof(pub_arg_t));
+	if (!arg) {
+		log_err("no memory");
+		return -ENOMEM;
+	}
+	arg->type = MULTICAST_PUB;
+	strcpy(arg->src, REPLAYER_FRONTEND);
+	tcpaddr(arg->addr, inet_ntoa(get_addr()), replayer_port);
+
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
+	pthread_create(&thread, &attr, start_publisher, arg);
+	pthread_attr_destroy(&attr);
+
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
+	pthread_create(&thread, &attr, replay, NULL);
+	pthread_attr_destroy(&attr);
+
+	return connect_replayers();
 }

@@ -2,14 +2,15 @@
 #define _HEARTBEAT_H
 
 #include <zmq.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
-#include "lib/log.h"
-#include "lib/responder.h"
-#include "lib/requester.h"
+#include "responder.h"
+#include "requester.h"
 #include "collector.h"
-#include "mixer.h"
+#include "synth.h"
+#include "log.h"
 
 #define HEARTBEAT_COMMAND   1
 #define HEARTBEAT_WAITTIME  2 // sec
@@ -21,6 +22,6 @@ typedef struct heartbeat_arg {
 	char addr[ADDR_SIZE];
 } heartbeat_arg_t;
 
-void create_heartbeat();
+int create_heartbeat();
 
 #endif

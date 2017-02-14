@@ -1,23 +1,18 @@
 #ifndef _CLIENT_H
 #define _CLIENT_H
 
+#include <errno.h>
 #include <stdlib.h>
 #include <default.h>
 #include <pthread.h>
 #include <sys/time.h>
-#include "lib/util.h"
-#include "lib/publisher.h"
-#include "lib/requester.h"
-#include "lib/subscriber.h"
+#include "publisher.h"
+#include "requester.h"
+#include "subscriber.h"
+#include "util.h"
 
-#define INN_ADDR "ipc:///tmp/inn"
-#define CLIENT_ADDR "ipc:///tmp/innc"
+#define CLIENT_ADDR "ipc:///tmp/innclient"
 
-typedef struct notify_arg {
-	struct in_addr src;
-	char dest[ADDR_SIZE];
-} notify_arg_t;
-
-void create_client();
+int create_client();
 
 #endif

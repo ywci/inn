@@ -2,23 +2,23 @@
 #define _REPLAYER_H
 
 #include <zmq.h>
-#include <default.h>
 #include <pthread.h>
-#include "lib/log.h"
-#include "lib/record.h"
-#include "lib/publisher.h"
-#include "lib/subscriber.h"
-#include "mixer.h"
+#include <default.h>
+#include "subscriber.h"
+#include "publisher.h"
+#include "record.h"
+#include "synth.h"
+#include "log.h"
 
-#define REPLAYER_FRONTEND_ADDR "ipc:///tmp/innrf"
-#define REPLAYER_BACKEND_ADDR "ipc:///tmp/innrb"
+#define REPLAYER_BACKEND "ipc:///tmp/innreplayerb"
+#define REPLAYER_FRONTEND "ipc:///tmp/innreplayerf"
 
 typedef struct reply_arg {
 	int id;
 	int seq;
 } replay_arg_t;
 
-void create_replayer();
+int create_replayer();
 void message_replay(int id);
 
 #endif

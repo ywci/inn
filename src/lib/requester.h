@@ -10,8 +10,8 @@
 #include <default.h>
 #include "log.h"
 
-typedef int32_t req_t;
-typedef int32_t rep_t;
+typedef uint64_t req_t;
+typedef uint64_t rep_t;
 
 int request(char *address, req_t *req, rep_t *rep);
 
