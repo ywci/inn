@@ -11,7 +11,6 @@
 
 // SYNTH SETTINGS --------//
 #define RECONFIRM
-//#define INTENSIVE
 //------------------------//
 
 event_t suspend_event;
@@ -84,7 +83,7 @@ void delete_entry(int id, record_t *record)
 					record_t *curr = list_entry(k, record_t, list[id]);
 
 					if (timestamp_compare(curr->timestamp, ts) < 0) {
-						log_func("prev({id:%d, seq:%d})=>{id:%d, seq:%d}", id, rec->seq[id], id, curr->seq[id]);
+						log_func("{id:%d, seq:%d}.prev={id:%d, seq:%d}", id, rec->seq[id], id, curr->seq[id]);
 						if (is_empty(curr->next))
 							INIT_LIST_HEAD(curr->next);
 						list_add_tail(i, curr->next);
@@ -92,6 +91,7 @@ void delete_entry(int id, record_t *record)
 						break;
 					}
 				}
+
 				assert(k != head);
 			}
 			list_del(&record->link[id]);
@@ -118,7 +118,7 @@ void delete_entry(int id, record_t *record)
 			log_debug("==-- early bird --== {id:%d, seq:%d}", id, seq);
 			show_timestamp(">>refresh<<", id, ts);
 		}
-	} else{
+	} else {
 		if (prev)
 			list_del(&record->link[id]);
 		else {
@@ -175,6 +175,8 @@ void get_vector(byte *vector)
 #ifdef BALANCE
 inline void check_balance(int id, int seq)
 {
+	if (seq < 0)
+		return;
 	if (balance_wait) {
 		if ((id == curr_id) && (curr_seq - seq <= SKEW_MAX)) {
 			balance_wait = false;
@@ -191,10 +193,9 @@ inline void check_balance(int id, int seq)
 
 inline void balance()
 {
-	if (balance_wait) {
-		event_wait(&balance_event);
-		balance_wait = false;
-	}
+	if (balance_wait)
+		if (!event_wait(&balance_event))
+			balance_wait = false;
 }
 #endif
 
@@ -555,13 +556,13 @@ void *do_deliver(void *arg)
 
 zmsg_t *do_update_message(zmsg_t *msg)
 {
-	int seq;
-#ifdef FASTMODE
-	zmsg_t *tmp;
-#endif
+	int seq = -1;
 	record_t *record;
 	byte vecotr[VECTORSZ] = {0};
 	zframe_t *frame = zmsg_first(msg);
+#ifdef FASTMODE
+	zmsg_t *tmp;
+#endif
 
 	assert(zframe_size(frame) == TIMESTAMP_SIZE);
 	lock_acquire(node_id);
@@ -571,24 +572,13 @@ zmsg_t *do_update_message(zmsg_t *msg)
 		lock_release(node_id);
 		return NULL;
 	}
-
 	record = record_get(node_id, msg);
-	if (record) {
-		if (!record->seq[node_id]) {
-			dep_matrix[node_id][node_id]++;
-			seq = update_seq(node_id, NULL);
+	if (record && !record->seq[node_id]) {
+		dep_matrix[node_id][node_id]++;
+		seq = update_seq(node_id, NULL);
 	#ifdef BALANCE
-			curr_seq = seq;
+		curr_seq = seq;
 	#endif
-			record->seq[node_id] = seq;
-			if (!record->deliver) {
-				update_queue(node_id, seq, record);
-	#ifdef INTENSIVE
-				event_set(&deliver_event);
-	#endif
-			}
-		}
-
 		get_vector(vecotr);
 	#ifdef FASTMODE
 		tmp = zmsg_new();
@@ -602,9 +592,16 @@ zmsg_t *do_update_message(zmsg_t *msg)
 		assert(frame);
 		zmsg_prepend(msg, &frame);
 		send_message(msg);
+		record->seq[node_id] = seq;
+		if (!record->deliver) {
+			update_queue(node_id, seq, record);
+			event_set(&deliver_event);
+		}
 	} else
 		zmsg_destroy(&msg);
 
+	if (record)
+		record_put(node_id, record);
 	lock_release(node_id);
 	return NULL;
 }
@@ -625,8 +622,9 @@ void add_message(int id, int seq, zmsg_t *msg)
 	zframe_t *frame = NULL;
 	record_t *record = NULL;
 #ifdef REUSE
-	bool reuse = false;
+	zmsg_t *dup = NULL;
 #endif
+
 	if (seq < 0) {
 		frame = zmsg_pop(msg);
 		assert(zframe_size(frame) == vector_size);
@@ -641,44 +639,41 @@ void add_message(int id, int seq, zmsg_t *msg)
 		goto out;
 	}
 
-	if (!(node_mask[id] & available_nodes)) {
-		log_func("receive a message from unavailable node %d", id);
-		goto out;
-	}
-
 	record = record_get(id, msg);
-	if (record) {
-		if (!record->seq[id]) {
-			if (seq < 0) {
-				seq = update_seq(id, zframe_data(frame));
-				if (seq < 0)
-					goto out;
-			} else if (check_seq(id, seq))
+	if (record && !record->seq[id]) {
+		if (seq < 0) {
+			seq = update_seq(id, zframe_data(frame));
+			if (seq < 0)
 				goto out;
-#ifdef BALANCE
-			check_balance(id, seq);
-#endif
-			record->seq[id] = seq;
-			if(!record->deliver) {
-				update_queue(id, seq, record);
-				event_set(&deliver_event);
-			}
+		} else if (check_seq(id, seq))
+			goto out;
+		record->seq[id] = seq;
+		if(!record->deliver) {
+			update_queue(id, seq, record);
+			event_set(&deliver_event);
 		}
 #ifdef REUSE
-		if (!record->seq[node_id])
-			reuse = true;
+		if (!record->seq[node_id]) {
+			dup = zmsg_dup(msg);
+			assert(dup);
+		}
 #endif
 	}
 out:
+	if (record)
+		record_put(id, record);
 	lock_release(id);
-	zframe_destroy(&frame);
 #ifdef REUSE
-	if (reuse)
-		do_update_message(msg);
-	else
+	if (dup)
+		do_update_message(dup);
 #endif
-		if (msg)
-			zmsg_destroy(&msg);
+	if (frame)
+		zframe_destroy(&frame);
+	if (msg)
+		zmsg_destroy(&msg);
+#ifdef BALANCE
+	check_balance(id, seq);
+#endif
 }
 
 

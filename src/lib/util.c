@@ -53,14 +53,14 @@ void map_addr(const char *protocol, char *addr, char *orig, int port)
 void publish(sender_desc_t *sender, zmsg_t *msg)
 {
 	int i;
-	zmsg_t *dup;
 
 	for (i = 0; i < sender->total - 1; i++) {
-		dup = zmsg_dup(msg);
-		zmsg_send(&dup, sender->desc[i]);
+		zmsg_t *dup = zmsg_dup(msg);
+		
+		sndmsg(&dup, sender->desc[i]);
 	}
 
-	zmsg_send(&msg, sender->desc[i]);
+	sndmsg(&msg, sender->desc[i]);
 }
 
 
@@ -79,7 +79,7 @@ void forward(void *src, void *dest, callback_t callback, sender_desc_t *sender)
 				else
 					publish(sender, msg);
 			} else
-				zmsg_send(&msg, dest);
+				sndmsg(&msg, dest);
 		}
 	}
 }

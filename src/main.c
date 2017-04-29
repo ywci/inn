@@ -7,6 +7,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <string.h>
 #include <pthread.h>
 #include <default.h>
@@ -72,6 +73,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-	getchar();
+	pause();
 	return 0;
 }

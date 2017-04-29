@@ -8,6 +8,7 @@
 #define SHOW_VECTOR
 #define SHOW_MATRIX
 //#define SHOW_RECORD
+#define SHOW_SNDMSG
 #define SHOW_TIMESTAMP
 #endif
 

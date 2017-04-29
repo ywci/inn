@@ -26,7 +26,7 @@ void *start_responder(void *ptr)
 	ret = zmq_bind(socket, arg->addr);
 	free(arg);
 	if (ret) {
-		log_err("failed to start responder");
+		log_err("failed to start responder, addr=%s", arg->addr);
 		return NULL;
 	}
 

@@ -40,16 +40,11 @@ record_t *record_add(record_tree_t *tree, zmsg_t *msg)
 		log_err("no memory");
 		return NULL;
 	}
-
 	dup = zmsg_dup(msg);
-	if (!dup) {
-		log_err("failed to add");
-		free(rec);
-		return NULL;
-	}
-
+	assert(dup);
 	frame = zmsg_first(dup);
 	rec->msg = dup;
+	rec->tree = tree;
 	rec->timestamp = (char *)zframe_data(frame);
 	rbtree_insert(tree->root, rec->timestamp, rec, timestamp_compare);
 	return rec;
@@ -81,6 +76,7 @@ record_t *record_get(int id, zmsg_t *msg)
 	record_node_t node;
 	record_tree_t *tree;
 	record_t *rec = NULL;
+	bool available = node_mask[id] & available_nodes;
 
 	frame = zmsg_first(msg);
 	assert(zframe_size(frame) == TIMESTAMP_SIZE);
@@ -89,13 +85,19 @@ record_t *record_get(int id, zmsg_t *msg)
 	pthread_mutex_lock(&tree->mutex);
 	node = record_lookup_node(tree, timestamp);
 	if (!node) {
+		if (!available)
+			goto out;
 		rec = record_add(tree, msg);
 		if (!rec) {
 			log_err("failed to add record");
 			goto out;
 		}
-	} else
+	} else {
 		rec = (record_t *)node->value;
+		if (!rec->node)
+			rec->node = node;
+	}
+
 #ifdef FASTMODE
 	if ((zmsg_size(rec->msg) == 1) && (zmsg_size(msg) == 2)) {
 		assert(id == node_id);
@@ -103,15 +105,11 @@ record_t *record_get(int id, zmsg_t *msg)
 		zmsg_append(rec->msg, &frame);
 	}
 #endif
-	if (!rec->seq[id])
-		rec->bitmap |= node_mask[id];
 
-	if (rec->release) {
-		if ((rec->bitmap & available_nodes) == available_nodes) {
-			assert(node);
+	if (!available) {
+		if ((rec->release) && ((rec->bitmap & available_nodes) == available_nodes))
 			record_remove_node(tree, node);
-			rec = NULL;
-		}
+		rec = NULL;
 	}
 out:
 	pthread_mutex_unlock(&tree->mutex);
@@ -120,20 +118,21 @@ out:
 }
 
 
-void record_release(record_t *record)
+void record_put(int id, record_t *record)
 {
-	char *timestamp = record->timestamp;
-	record_tree_t *tree = &record_groups[record_hash(timestamp)];
+	record_tree_t *tree = record->tree;
 
 	pthread_mutex_lock(&tree->mutex);
-	if ((record->bitmap & available_nodes) == available_nodes) {
-		record_node_t node = record_lookup_node(tree, timestamp);
-
-		assert(node);
-		record_remove_node(tree, node);
-	} else
-		record->release = true;
+	record->bitmap |= node_mask[id];
+	if (record->release && ((record->bitmap & available_nodes) == available_nodes))
+		record_remove_node(tree, record->node);
 	pthread_mutex_unlock(&tree->mutex);
+}
+
+
+void record_release(record_t *record)
+{
+	record->release = true;
 }
 
 

@@ -17,6 +17,8 @@ typedef struct record_tree {
 	pthread_mutex_t mutex;
 } record_tree_t;
 
+typedef rbtree_node record_node_t;
+
 typedef struct record {
 	zmsg_t *msg;
 	bool deliver;
@@ -25,6 +27,8 @@ typedef struct record {
 	bitmap_t bitmap;
 	bitmap_t status;
 	int seq[NODE_MAX];
+	record_node_t node;
+	record_tree_t *tree;
 	bool ready[NODE_MAX];
 	bool visible[NODE_MAX];
 	bitmap_t confirm[NODE_MAX];
@@ -34,12 +38,11 @@ typedef struct record {
 	struct list_head list[NODE_MAX];
 } record_t;
 
-typedef rbtree_node record_node_t;
-
 int record_min(int id);
 int record_max(int id);
 zmsg_t *record_get_msg(int id, int seq);
 record_t *record_get(int id, zmsg_t *msg);
+void record_put(int id, record_t *record);
 void record_release(record_t *record);
 void record_init();
 

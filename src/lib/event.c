@@ -11,20 +11,20 @@ int event_init(event_t *ev)
 {
 	if (ev->timeout) {
 #ifdef TIMEDWAIT
-	pthread_condattr_t attr;
+		pthread_condattr_t attr;
 
-	if (ev->timeout >= SECOND) {
-		log_err("failed to initialize");
-		return -1;
-	}
-	pthread_condattr_init(&attr);
-	if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC)) {
-		log_err("failed to initialize");
-		return -1;
-	}
-	pthread_cond_init(&ev->cond, &attr);
+		if (ev->timeout >= SECOND) {
+			log_err("failed to initialize");
+			return -1;
+		}
+		pthread_condattr_init(&attr);
+		if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC)) {
+			log_err("failed to initialize");
+			return -1;
+		}
+		pthread_cond_init(&ev->cond, &attr);
 #else
-	pthread_cond_init(&ev->cond, NULL);
+		pthread_cond_init(&ev->cond, NULL);
 #endif
 	} else
 		pthread_cond_init(&ev->cond, NULL);
@@ -45,8 +45,10 @@ void event_set(event_t *ev)
 }
 
 
-void event_wait(event_t *ev)
+int event_wait(event_t *ev)
 {
+	int ret = 0;
+
 	pthread_mutex_lock(&ev->mutex);
 	if (!ev->active) {
 		if (ev->timeout) {
@@ -61,7 +63,7 @@ void event_wait(event_t *ev)
 				timeout.tv_nsec = tmp - SECOND;
 			} else
 				timeout.tv_nsec = tmp;
-			pthread_cond_timedwait(&ev->cond, &ev->mutex, &timeout);
+			ret = pthread_cond_timedwait(&ev->cond, &ev->mutex, &timeout);
 #else
 			pthread_cond_wait(&ev->cond, &ev->mutex);
 #endif
@@ -70,4 +72,5 @@ void event_wait(event_t *ev)
 	}
 	ev->active = 0;
 	pthread_mutex_unlock(&ev->mutex);
+	return ret;
 }

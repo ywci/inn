@@ -163,6 +163,7 @@ int parse()
 	yaml_node_pair_t *p;
 	yaml_parser_t parser;
 
+	assert((32 % NBIT) == 0);
 	fp = fopen(PATH_CONF, "rb");
 	if (!fp) {
 		log_err("cannot find %s", PATH_CONF);
@@ -181,7 +182,7 @@ int parse()
 		ret = -1;
 		goto out;
 	}
-	assert((32 % NBIT) == 0);
+
 	for (p = start->data.mapping.pairs.start; p < start->data.mapping.pairs.top; p++) {
 		int ret;
 		yaml_node_t *key = &start[p->key - 1];

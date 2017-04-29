@@ -20,7 +20,7 @@ typedef struct event {
 } event_t;
 
 int event_init(event_t *ev);
+int event_wait(event_t *ev);
 void event_set(event_t *ev);
-void event_wait(event_t *ev);
 
 #endif

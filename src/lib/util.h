@@ -17,6 +17,16 @@
 #define epgmaddr(addr, orig, port) map_addr("epgm", addr, orig, port)
 #define tcpaddr(addr, orig, port) sprintf(addr, "tcp://%s:%d", orig, port)
 
+#ifdef SHOW_SNDMSG
+#define sndmsg(msg, socket) do { \
+	log_func("start=>sndmsg"); \
+	zmsg_send(msg, socket); \
+	log_func("finish=>sndmsg"); \
+} while (0)
+#else
+#define sndmsg(msg, socket) zmsg_send(msg, socket)
+#endif
+
 #define show_array(str, name, array) do { \
 	const int bufsz = 1024; \
 	const int reserve = 256; \

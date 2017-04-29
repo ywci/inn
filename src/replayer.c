@@ -62,7 +62,7 @@ void send_replay_message(int id, int seq, zmsg_t *msg)
 	zmsg_prepend(newmsg, &frame);
 	ret = zmq_connect(socket, REPLAYER_FRONTEND);
 	if (!ret) {
-		zmsg_send(&newmsg, socket);
+		sndmsg(&newmsg, socket);
 		zmq_close(socket);
 	} else
 		log_err("failed to send replay message");
