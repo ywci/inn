@@ -1,7 +1,8 @@
-back2back : back2back.c
-	./chkiface.sh
-	gcc back2back.c -L/usr/local/lib -lzmq -lczmq -g -o back2back
+banchmark: banchmark.c gen.c
+	./config.sh
+	gcc banchmark.c gen.c -L/usr/local/lib -lzmq -lczmq -g -o banchmark
 
-clean :
-	rm -f back2back
-	rm -rf back2back.dSYM
+clean:
+	rm -f conf.h
+	rm -f banchmark
+	rm -rf banchmark.dSYM

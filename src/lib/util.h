@@ -1,7 +1,10 @@
 #ifndef _UTIL_H
 #define _UTIL_H
 
+#include <zmq.h>
 #include <czmq.h>
+#include <errno.h>
+#include <assert.h>
 #include <net/if.h>
 #include <stdlib.h>
 #include <default.h>
@@ -10,166 +13,139 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include "timestamp.h"
 #include "queue.h"
+#include "list.h"
 #include "log.h"
 
-#define pgmaddr(addr, orig, port) map_addr("pgm", addr, orig, port)
-#define epgmaddr(addr, orig, port) map_addr("epgm", addr, orig, port)
+#define get_time(t) gettimeofday(&(t), NULL)
+#define addr2hid(addr) ((hid_t)(addr).s_addr)
+#define get_timestamp(msg) ((timestamp_t *)zframe_data(zmsg_first(msg)))
+
+#define pgmaddr(addr, orig, port) addr_convert("pgm", addr, orig, port)
+#define epgmaddr(addr, orig, port) addr_convert("epgm", addr, orig, port)
 #define tcpaddr(addr, orig, port) sprintf(addr, "tcp://%s:%d", orig, port)
 
-#ifdef SHOW_SNDMSG
-#define sndmsg(msg, socket) do { \
-	log_func("start=>sndmsg"); \
-	zmsg_send(msg, socket); \
-	log_func("finish=>sndmsg"); \
-} while (0)
-#else
-#define sndmsg(msg, socket) zmsg_send(msg, socket)
-#endif
+#define is_delivered(rec) ((rec)->deliver)
+#define is_empty(list) ((list)->next == NULL)
+#define is_valid(list) ((list)->next != NULL)
+#define set_empty(list) do { (list)->next = NULL; } while (0)
 
-#define show_array(str, name, array) do { \
-	const int bufsz = 1024; \
-	const int reserve = 256; \
-	if (strlen(str) + reserve < bufsz) { \
-		int i; \
-		char buf[bufsz]; \
-		char *p = buf; \
-		assert(nr_nodes > 1); \
-		sprintf(p, "%s: %s=>[", str, name); \
-		p += strlen(p); \
-		for (i = 0; i < nr_nodes - 1; i++) { \
-			sprintf(p, "%d, ", array[i]); \
-			p += strlen(p); \
-		} \
-		sprintf(p, "%d]", array[i]); \
-		log_debug("%s", buf); \
-	} \
-} while (0)
-
-#define show_bitmap(str, bitmap) do {\
-	const int bufsz = 1024; \
-	const int reserve = 256; \
-	if (strlen(str) + reserve < bufsz) { \
-		int i; \
-		char buf[bufsz]; \
-		char *p = buf; \
-		sprintf(p, "%s: bitmap=>|", str); \
-		p += strlen(p); \
-		for (i = 0; i < nr_nodes; i++) { \
-			sprintf(p,"%d|", (bitmap & node_mask[i]) != 0); \
-			p += strlen(p); \
-		} \
-		log_debug("%s", buf); \
-	} \
-} while (0)
-
-#ifdef SHOW_TIMESTAMP
-#define show_timestamp(str, id, ts) do { \
-	hid_t src; \
-	unsigned long sec; \
-	unsigned long usec; \
-	extract_timestamp(ts, &sec, &usec, &src); \
-	if (id >= 0) \
-		log_debug("%s: timestamp=%08lx%05lx.%lx (id=%d)", str, sec, usec, (unsigned long)src, id); \
-	else \
-		log_debug("%s: timestamp=%08lx%05lx.%lx", str, sec, usec, (unsigned long)src); \
-} while (0)
-#else
-#define show_timestamp(str, id, ts) do {} while (0)
-#endif
-
-#ifdef SHOW_VECTOR
-#define show_vector(str, id, vector) do { \
-	int i; \
-	int cnt = 0; \
-	int pos = 0; \
-	char buf[256]; \
- 	char *p = buf; \
-	byte val = vector[0]; \
-	const unsigned int mask = (1 << NBIT) - 1; \
-	sprintf(buf, "%s: [vector]=>|", str); \
-	p += strlen(p); \
-	for (i = 0; i < nr_nodes; i++) { \
-		if (i != id) { \
-			sprintf(p, "%d|", val & mask); \
-			cnt += NBIT; \
-			if (cnt == 8) { \
-				cnt = 0; \
-				pos += 1; \
-				if (pos < vector_size) \
-					val = vector[pos]; \
-			} else \
-				val = val >> NBIT; \
-		} else \
-			sprintf(p, "0|"); \
-		p += strlen(p); \
-	} \
-	if (id >= 0) \
-		sprintf(p, " (id=%d)", id); \
-	log_debug("%s", buf); \
-} while (0)
-#else
-#define show_vector(str, id, vector) do {} while (0)
-#endif
-
-#ifdef SHOW_MATRIX
-#define show_matrix(mtx, h, w) do { \
-	int i; \
-	int j; \
-	char *p; \
-	char *buf = (char *)malloc(9 * w + 2); \
-	log_debug("[matrix]"); \
-	for (i = 0; i < h; i++) { \
-		strcpy(buf, "|"); \
-		p = buf + strlen(buf); \
-		for (j = 0; j < w; j++) { \
-			sprintf(p, "%08d|", mtx[i][j]); \
-			p += strlen(p); \
-		} \
-		log_debug("%s", buf); \
-	} \
-	free(buf); \
-} while (0)
-#else
-#define show_matrix(mtx, h, w) do {} while (0)
-#endif
-
-#ifdef SHOW_RECORD
-#define show_record(id, rec) do { \
-	if (rec) { \
-		show_timestamp(__func__, id, rec->timestamp); \
-		show_bitmap(__func__, rec->bitmap); \
-		show_array(__func__, "seq", rec->seq); \
-		show_array(__func__, "ready", rec->ready); \
-		show_array(__func__, "visible", rec->visible); \
-	} \
-} while (0)
-#else
-#define show_record(req, id) do {} while (0)
-#endif
-
-#define timestamp_empty(ts) ((ts)[TIMESTAMP_SIZE - 1] == 0)
-#define timestamp_clear(ts) memset(ts, 0, TIMESTAMP_SIZE)
-#define timestamp_copy(dest, src) memcpy(dest, src, TIMESTAMP_SIZE)
-
-typedef struct timeval timeval_t;
 typedef void (*sender_t)(zmsg_t *);
 typedef zmsg_t *(*callback_t)(zmsg_t *);
 
 typedef struct sender_desc {
-	int total;
-	sender_t sender;
-	void *desc[NODE_MAX];
+    int total;
+    sender_t sender;
+    void *desc[NODE_MAX];
 } sender_desc_t;
 
+typedef struct __attribute__((__packed__)) {
+    timestamp_sec_t sec;
+    timestamp_usec_t usec;
+} host_time_t;
+
+#define sndmsg(msg, socket) zmsg_send(msg, socket)
+
+#define assert_list_add_tail(ent, head) do { \
+    struct list_head *_ent = ent;            \
+    struct list_head *_head = head;          \
+    assert(_ent);                            \
+    assert(_head);                           \
+    assert(_head->next && _head->prev);      \
+    list_add_tail(_ent, _head);              \
+} while (0)
+
+#define assert_list_add(ent, head) do {      \
+    struct list_head *_ent = ent;            \
+    struct list_head *_head = head;          \
+    assert(_ent);                            \
+    assert(_head);                           \
+    assert(_head->next && _head->prev);      \
+    list_add(_ent, _head);                   \
+} while (0)
+
 hid_t get_hid();
+void init_func_timer();
 struct in_addr get_addr();
-void evaluate(char *buf, size_t size);
 void publish(sender_desc_t *sender, zmsg_t *msg);
-void set_timestamp(char *timestamp, struct timeval *tv);
-void map_addr(const char *protocol, char *addr, char *orig, int port);
+uint64_t time_diff(timeval_t *start, timeval_t *end);
+void addr_convert(const char *protocol, char *dest, char *src, int port);
 void forward(void *frontend, void *backend, callback_t callback, sender_desc_t *sender);
-void extract_timestamp(char *ts, unsigned long *sec, unsigned long *usec, hid_t *src);
-int timestamp_compare(char *ts1, char *ts2);
+
+#ifdef LOG_AFTER_CRASH
+#define debug_log_after_crash log_enable
+#else
+#define debug_log_after_crash(...) do {} while (0)
+#endif
+
+#ifdef QUIET_AFTER_RECYCLE
+#define debug_quiet_after_recycle log_disable
+#else
+#define debug_quiet_after_recycle(...) do {} while (0)
+#endif
+
+#ifdef QUIET_AFTER_RESUME
+#define debug_quiet_after_resume log_disable
+#else
+#define debug_quiet_after_resume(...) do {} while (0)
+#endif
+
+#ifdef CRASH_AFTER_RESUME
+#define debug_crash_after_resume() exit(-1)
+#else
+#define debug_crash_after_resume() do {} while (0)
+#endif
+
+#ifdef CRASH_BEFORE_SUSPEND
+#define debug_crash_before_suspend() exit(-1)
+#else
+#define debug_crash_before_suspend() do {} while (0)
+#endif
+
+#ifdef SIMU_CRASH
+#define debug_crash_simu() { \
+    if (node_id < CRASH_NODES) { \
+        static int cnt = 0; \
+        cnt++; \
+        if (cnt == CRASH_AFTER_N_REQ) \
+            exit(-1); \
+    } \
+}
+#else
+#define debug_crash_simu() do {} while (0)
+#endif
+
+#ifdef SLOW_DOWN_AFTER_CRASH
+#define debug_slow_down_after_crash() do { \
+    if (log_is_valid()) { \
+        log_func("slowing down ..."); \
+        sleep(30); \
+    } \
+} while (0)
+#else
+#define debug_slow_down_after_crash(...) do {} while (0)
+#endif
+
+void func_timer_start(const char *func_name);
+void func_timer_stop(const char *func_name);
+
+#ifdef FUNC_TIMER
+#define track_enter_call(func) do { \
+    func_timer_start(__func__); \
+    func(); \
+} while (0)
+#define track_enter() func_timer_start(__func__)
+#define track_exit_call(func) do { \
+    func_timer_stop(__func__); \
+    func(); \
+} while (0)
+#define track_exit(func) func_timer_stop(__func__)
+#else
+#define track_enter_call(func) func()
+#define track_exit_call(func) func()
+#define track_enter() do {} while (0)
+#define track_exit() do {} while (0)
+#endif
 
 #endif

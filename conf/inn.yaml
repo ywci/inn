@@ -1,24 +1,13 @@
-host:
-  iface: eth0
+servers: [192.168.0.1, 192.168.0.2, 192.168.0.3]
 
-sampler:
-  port: 40010
-  addr: [192.168.0.1, 192.168.0.2, 192.168.0.3]
+iface: eth0
 
-synthesizer:
-  port: 40110
-
-replayer:
-  port: 40210
-
-collector:
-  port: 40310
-
-heartbeat:
-  port: 40410
-
-notifier:
-  port: 40510
-
-client:
-  port: 40610
+ports:
+    client:      40010
+    sampler:     40110
+    notifier:    40210
+    replayer:    40310
+    collector:   40410
+    heartbeat:   40510
+    evaluator:   40610
+    synthesizer: 40710

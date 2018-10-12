@@ -1,18 +1,21 @@
-# INN - An Index-Based Consensus System
+# Inn - Achieve Consensus By Inner-Order
 
 # Quick Start
 ### 1. Build
 The build settings are contained in *conf/build.cfg*.
-* Run->*build.sh*
+* Run->*./build.sh*
 
 ### 2. Start
-* Run->*inn*
+* Run->*build/inn*
 
 ### 3. Configure
-The configurations of INN are contained in *conf/inn.yaml*.
+The configurations of Inn are contained in *conf/inn.yaml*.
 
 # Dependencies
 * zmq, czmq, aclocal, autoconf, autoheader, automake, autoreconf, libyaml
 
+# Version
+* Current version: 0.1.0
+
 # License
-INN is released under the terms of the MIT License.
+The Inn is released under the terms of the MIT License.

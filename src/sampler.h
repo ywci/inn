@@ -1,21 +1,14 @@
 #ifndef _SAMPLER_H
 #define _SAMPLER_H
 
-#include <errno.h>
-#include <pthread.h>
-#include <default.h>
-#include "responder.h"
-#include "publisher.h"
-#include "subscriber.h"
-#include "collector.h"
-#include "heartbeat.h"
-#include "replayer.h"
-#include "record.h"
-#include "synth.h"
+#include "util.h"
 
-#define INDEXER_ADDR "ipc:///tmp/innsampler"
-
-int create_sampler();
-void send_message(zmsg_t *msg);
+int sampler_create();
+void sampler_drain();
+void sampler_resume();
+void sampler_suspend();
+void sampler_stop_filter();
+void sampler_handle(int id, zmsg_t *msg);
+void sampler_start_filter(host_time_t bound);
 
 #endif

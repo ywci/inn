@@ -1,46 +1,46 @@
 /* responder.c
  *
- * Copyright (C) 2015-2017 Yi-Wei Ci
+ * Copyright (C) 2018 Yi-Wei Ci
  *
  * Distributed under the terms of the MIT license.
  */
 
 #include "responder.h"
 
-void *start_responder(void *ptr)
+void *responder_start(void *ptr)
 {
-	int ret;
-	void *socket;
-	void *context;
-	responder_t callback;
-	responder_arg_t *arg = (responder_arg_t *)ptr;
+    int ret;
+    void *socket;
+    void *context;
+    responder_t callback;
+    responder_arg_t *arg = (responder_arg_t *)ptr;
 
-	if (!arg) {
-		log_err("invalid argument");
-		return NULL;
-	}
+    if (!arg) {
+        log_err("invalid argument");
+        return NULL;
+    }
 
-	callback = arg->responder;
-	context = zmq_ctx_new();
-	socket = zmq_socket(context, ZMQ_REP);
-	ret = zmq_bind(socket, arg->addr);
-	free(arg);
-	if (ret) {
-		log_err("failed to start responder, addr=%s", arg->addr);
-		return NULL;
-	}
+    callback = arg->responder;
+    context = zmq_ctx_new();
+    socket = zmq_socket(context, ZMQ_REP);
+    ret = zmq_bind(socket, arg->addr);
+    free(arg);
+    if (ret) {
+        log_err("failed to start responder, addr=%s", arg->addr);
+        return NULL;
+    }
 
-	while (true) {
-		req_t req;
-		rep_t rep;
+    while (true) {
+        req_t req;
+        rep_t rep;
 
-		zmq_recv(socket, &req, sizeof(req_t), 0);
-		if (callback)
-			rep = callback(req);
-		else
-			memset(&rep, 0, sizeof(rep_t));
-		zmq_send(socket, &rep, sizeof(rep_t), 0);
-	}
+        zmq_recv(socket, &req, sizeof(req_t), 0);
+        if (callback)
+            rep = callback(req);
+        else
+            memset(&rep, 0, sizeof(rep_t));
+        zmq_send(socket, &rep, sizeof(rep_t), 0);
+    }
 
-	return NULL;
+    return NULL;
 }

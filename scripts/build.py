@@ -29,9 +29,12 @@ def _get_home_dir():
 sys.path.append(os.path.join(_get_home_dir(), 'scripts'))
 from configure import *
 
-def _get_conf():
+def _get_conf_dir():
     home = _get_home_dir()
-    return os.path.join(home, 'conf', 'build.cfg')
+    return os.path.join(home, 'conf')
+
+def _get_conf():
+    return os.path.join(_get_conf_dir(), 'build.cfg')
 
 def _get_build_dir():
     home = _get_home_dir()
@@ -144,13 +147,15 @@ def _conf_proj():
     lines.append('LDFLAGS = -L/usr/local/lib\n')
     if LIBS:
         lines.append('LIBS = %s\n' % ' '.join(["-l%s" % i for i in LIBS]))
-    cflags = 'AM_CFLAGS = -I/usr/local/include -I./include -I./src -Wno-unused-result'
+    cflags = 'AM_CFLAGS = -I/usr/local/include -I./include -I./src -Wno-unused-result -Wno-address-of-packed-member'
     if INCL:
         cflags += ' %s' % ' '.join(['-I%s' % i for i in INCL])
     if libs:
         cflags += ' %s' % ' '.join(['-I./src/%s' % i for i in libs])
     if DEFS:
-        cflags += ' %s' % ' '.join(['-D %s' % i for i in DEFS])
+        cflags += ' %s' % ' '.join(['-D%s' % i for i in DEFS])
+    if platform.system() == 'Linux':
+        cflags += ' -DLINUX'
     lines.append(cflags + '\n\n')
     lines.append('bin_PROGRAMS = %s\n' % INFO['name'])
 
@@ -177,6 +182,7 @@ def _conf_proj():
     path = os.path.join(dirname, 'm4')
     if not os.path.exists(path):
         os.makedirs(path, 0o755)
+    shutil.copytree(_get_conf_dir(), os.path.join(_get_build_dir(), 'conf'))
 
 def _read_args():
     path = _get_conf()
@@ -206,7 +212,7 @@ def _chkargs():
         val = ''
         typ = ARGS[i].get('type')
         if typ == 'bool':
-            if res:
+            if int(res) != 0:
                 val = i.upper()
                 if val in DEFS:
                     continue
@@ -238,16 +244,22 @@ def _call(cmd, path=None, quiet=False, ignore=False):
             if not ignore:
                 raise Exception('Error: failed to run %s' % cmd)
 
-def _build():
-    path = _get_build_dir()
+def _auto_conf(path):
     _call('aclocal', path, quiet=True)
     _call('autoconf', path, quiet=True)
     _call('autoheader', path, quiet=True)
     _call('touch NEWS README AUTHORS ChangeLog', path)
     _call('automake --add-missing', path, quiet=True, ignore=True)
     _call('autoreconf -if', path, quiet=True)
+
+def _make(path):
     _call('./configure', path, quiet=True)
     _call('make', path)
+
+def _build():
+    path = _get_build_dir()
+    _auto_conf(path)
+    _make(path)
 
 if __name__ == '__main__':
     _generate()

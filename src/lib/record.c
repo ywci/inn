@@ -1,305 +1,190 @@
 /* record.c
  *
- * Copyright (C) 2015-2017 Yi-Wei Ci
+ * Copyright (C) 2018 Yi-Wei Ci
  *
  * Distributed under the terms of the MIT license.
  */
 
+#include "batch.h"
 #include "record.h"
-#include "ts.h"
+#include "timestamp.h"
 
-record_tree_t record_groups[NR_RECORD_GROUPS];
+#define NR_RECORD_GROUPS 1024
 
-void record_init()
+#define record_tree_create rb_tree_new
+#define record_node_lookup rb_tree_find
+#define record_node_insert rb_tree_insert
+#define record_node_remove rb_tree_remove
+#define record_lock_init pthread_mutex_init
+#define record_group_lock(grp) pthread_mutex_lock(&(grp)->lock)
+#define record_group_unlock(grp) pthread_mutex_unlock(&(grp)->lock)
+#define record_hash(timestamp) ((timestamp)->usec % NR_RECORD_GROUPS)
+
+struct {
+    pthread_rwlock_t rwlock;
+    pthread_rwlock_t deliver_lock;
+    record_group_t record_groups[NR_RECORD_GROUPS];
+} record_status;
+
+int record_node_compare(const void *t1, const void *t2)
 {
-	int i;
-
-	for (i = 0; i < NR_RECORD_GROUPS; i++) {
-		record_groups[i].root = rbtree_create();
-		pthread_mutex_init(&record_groups[i].mutex, NULL);
-	}
+    assert(t1 && t2);
+    return timestamp_compare(t1, t2);
 }
 
 
-unsigned long record_hash(char *ts)
+inline void record_rdlock()
 {
-	unsigned long n = 0;
-
-	memcpy(&n, &ts[4], 2);
-	return n % NR_RECORD_GROUPS;
+    pthread_rwlock_rdlock(&record_status.rwlock);
 }
 
 
-record_t *record_add(record_tree_t *tree, zmsg_t *msg)
+inline void record_wrlock()
 {
-	zmsg_t *dup;
-	zframe_t *frame;
-	record_t *rec = (record_t *)calloc(1, sizeof(record_t));
-
-	if (!rec) {
-		log_err("no memory");
-		return NULL;
-	}
-	dup = zmsg_dup(msg);
-	assert(dup);
-	frame = zmsg_first(dup);
-	rec->msg = dup;
-	rec->tree = tree;
-	rec->timestamp = (char *)zframe_data(frame);
-	rbtree_insert(tree->root, rec->timestamp, rec, timestamp_compare);
-	return rec;
+    pthread_rwlock_wrlock(&record_status.rwlock);
 }
 
 
-inline record_node_t record_lookup_node(record_tree_t *tree, char *ts)
+inline void record_unlock()
 {
-	return rbtree_lookup_node(tree->root, ts, timestamp_compare);
+    pthread_rwlock_unlock(&record_status.rwlock);
 }
 
 
-inline void record_remove_node(record_tree_t *tree, record_node_t node)
+inline record_group_t *record_get_group(timestamp_t *timestamp)
 {
-	record_t *rec = (record_t *)node->value;
+    unsigned int n = record_hash(timestamp);
 
-	show_record(-1, rec);
-	ts_update(rec->timestamp);
-	rbtree_delete_node(tree->root, node);
-	zmsg_destroy(&rec->msg);
-	free(rec);
+    assert(n < NR_RECORD_GROUPS);
+    return &record_status.record_groups[n];
+}
+
+
+inline record_t *record_lookup(record_group_t *group, timestamp_t *timestamp)
+{
+    record_node_t *node = NULL;
+
+    if (!record_node_lookup(&group->tree, timestamp, &node))
+        return tree_entry(node, record_t, node);
+    else
+        return NULL;
+}
+
+
+void record_deliver(record_t *rec)
+{
+    record_group_t *group = record_get_group(rec->timestamp);
+
+    timestamp_update(rec->timestamp);
+    record_group_lock(group);
+    rec->deliver = true;
+    record_group_unlock(group);
+}
+
+
+record_t *record_add(record_group_t *group, zmsg_t *msg)
+{
+    zframe_t *frame;
+    record_t *rec = (record_t *)calloc(1, sizeof(record_t));
+
+    frame = zmsg_first(msg);
+    rec->msg = msg;
+    rec->group = group;
+    rec->timestamp = (timestamp_t *)zframe_data(frame);
+    if (record_node_insert(&group->tree, rec->timestamp, &rec->node)) {
+        log_err("failed to insert");
+        assert(0);
+    }
+    return rec;
+}
+
+
+void record_group_remove(record_group_t *group, record_t *rec)
+{
+    assert(rec);
+    show_record(-1, rec);
+    if (record_node_remove(&group->tree, &rec->node)) {
+        log_err("failed to remove");
+        assert(0);
+    }
+    free(rec);
+}
+
+
+record_t *record_find(int id, timestamp_t *timestamp, zmsg_t *msg)
+{
+    record_t *rec = NULL;
+    record_group_t *group;
+    bool available = node_mask[id] & available_nodes;
+
+    record_rdlock();
+    group = record_get_group(timestamp);
+    record_group_lock(group);
+    rec = record_lookup(group, timestamp);
+    if (!rec) {
+        if (!available || !msg)
+            goto out;
+        rec = record_add(group, msg);
+        if (!rec) {
+            log_err("failed to add record");
+            goto out;
+        }
+    } else {
+        if (is_delivered(rec)) {
+            rec = NULL;
+            goto out;
+        }
+    }
+    show_record(id, rec);
+out:
+    record_group_unlock(group);
+    if (!rec)
+        record_unlock();
+    return rec;
 }
 
 
 record_t *record_get(int id, zmsg_t *msg)
 {
-	char *timestamp;
-	zframe_t *frame;
-	record_node_t node;
-	record_tree_t *tree;
-	record_t *rec = NULL;
-	bool available = node_mask[id] & available_nodes;
+    zframe_t *frame;
+    timestamp_t *timestamp;
 
-	frame = zmsg_first(msg);
-	assert(zframe_size(frame) == TIMESTAMP_SIZE);
-	timestamp = (char *)zframe_data(frame);
-	tree = &record_groups[record_hash(timestamp)];
-	pthread_mutex_lock(&tree->mutex);
-	node = record_lookup_node(tree, timestamp);
-	if (!node) {
-		if (!available)
-			goto out;
-		rec = record_add(tree, msg);
-		if (!rec) {
-			log_err("failed to add record");
-			goto out;
-		}
-	} else {
-		rec = (record_t *)node->value;
-		if (!rec->node)
-			rec->node = node;
-	}
-
-#ifdef FASTMODE
-	if ((zmsg_size(rec->msg) == 1) && (zmsg_size(msg) == 2)) {
-		assert(id == node_id);
-		frame = zframe_dup(zmsg_last(msg));
-		zmsg_append(rec->msg, &frame);
-	}
-#endif
-
-	if (!available) {
-		if ((rec->release) && ((rec->bitmap & available_nodes) == available_nodes))
-			record_remove_node(tree, node);
-		rec = NULL;
-	}
-out:
-	pthread_mutex_unlock(&tree->mutex);
-	show_record(id, rec);
-	return rec;
+    frame = zmsg_first(msg);
+    assert(zframe_size(frame) == sizeof(timestamp_t));
+    timestamp = (timestamp_t *)zframe_data(frame);
+    return record_find(id, timestamp, msg);
 }
 
 
 void record_put(int id, record_t *record)
 {
-	record_tree_t *tree = record->tree;
-
-	pthread_mutex_lock(&tree->mutex);
-	record->bitmap |= node_mask[id];
-	if (record->release && ((record->bitmap & available_nodes) == available_nodes))
-		record_remove_node(tree, record->node);
-	pthread_mutex_unlock(&tree->mutex);
+    record_unlock();
 }
 
 
 void record_release(record_t *record)
 {
-	record->release = true;
+    record_group_t *group = record->group;
+    timestamp_t *timestamp = record->timestamp;
+
+    batch_wrlock();
+    record_wrlock();
+    record_group_lock(group);
+    record_group_remove(group, record);
+    record_group_unlock(group);
+    record_unlock();
+    batch_remove(timestamp);
+    batch_unlock();
 }
 
 
-record_node_t record_lookup(record_node_t node, int id, int seq)
+void record_init()
 {
-	record_t *rec;
-	record_node_t ret = NULL;
-
-	if (!node || !seq)
-		return NULL;
-
-	if (node->right) {
-		ret = record_lookup(node->right, id, seq);
-		if (ret)
-			return ret;
-	}
-
-	rec = (record_t *)node->value;
-	if (rec->seq[id] == seq)
-		return node;
-
-	if (node->left)
-		ret = record_lookup(node->left, id, seq);
-
-	return ret;
-}
-
-
-zmsg_t *record_get_msg(int id, int seq)
-{
-	int i;
-
-	for (i = 0; i < NR_RECORD_GROUPS; i++) {
-		record_tree_t *tree = &record_groups[i];
-		record_node_t node = record_lookup(record_tree_node(tree), id, seq);
-
-		if (node) {
-			record_t *rec = (record_t *)node->value;
-
-			return rec->msg;
-		}
-	}
-	return NULL;
-}
-
-
-record_node_t record_lookup_min(record_node_t node, int id)
-{
-	int seq = 0;
-	record_t *rec;
-	record_node_t ret = NULL;
-
-	if (!node)
-		return ret;
-
-	if (node->right) {
-		ret = record_lookup_min(node->right, id);
-		if (ret) {
-			rec = (record_t *)ret->value;
-			seq = rec->seq[id];
-		}
-	}
-
-	rec = (record_t *)node->value;
-	if (rec->seq[id] && (!ret || (rec->seq[id] < seq))) {
-		ret = node;
-		seq = rec->seq[id];
-	}
-
-	if (node->left) {
-		record_node_t tmp = record_lookup_min(node->left, id);
-
-		if (tmp) {
-			rec = (record_t *)tmp->value;
-			if (rec->seq[id] && (!ret || (rec->seq[id] < seq)))
-				ret = node;
-		}
-	}
-
-	return ret;
-}
-
-
-int record_min(int id)
-{
-	int i;
-	int ret = 0;
-	record_t *rec = NULL;
-
-	for (i = 0; i < NR_RECORD_GROUPS; i++) {
-		record_tree_t *tree = &record_groups[i];
-		record_node_t node = record_lookup_min(record_tree_node(tree), id);
-
-		if (node) {
-			record_t *r = (record_t *)node->value;
-			int seq = r->seq[id];
-
-			if (!ret || (seq < ret)) {
-				ret = seq;
-				rec = r;
-			}
-		}
-	}
-
-	show_record(id, rec);
-	return ret;
-}
-
-
-record_node_t record_lookup_max(record_node_t node, int id)
-{
-	int seq = 0;
-	record_t *rec;
-	record_node_t ret = NULL;
-
-	if (!node)
-		return ret;
-
-	if (node->right) {
-		ret = record_lookup_max(node->right, id);
-		if (ret) {
-			rec = (record_t *)ret->value;
-			seq = rec->seq[id];
-		}
-	}
-
-	rec = (record_t *)node->value;
-	if (rec->seq[id] && (!ret || (rec->seq[id] > seq))) {
-		ret = node;
-		seq = rec->seq[id];
-	}
-
-	if (node->left) {
-		record_node_t tmp = record_lookup_max(node->left, id);
-
-		if (tmp) {
-			rec = (record_t *)tmp->value;
-			if (rec->seq[id] && (!ret || (rec->seq[id] > seq)))
-				ret = node;
-		}
-	}
-
-	return ret;
-}
-
-
-int record_max(int id)
-{
-	int i;
-	int ret = 0;
-	record_t *rec = NULL;
-
-	for (i = 0; i < NR_RECORD_GROUPS; i++) {
-		record_tree_t *tree = &record_groups[i];
-		record_node_t node = record_lookup_max(record_tree_node(tree), id);
-
-		if (node) {
-			record_t *r = (record_t *)node->value;
-			int seq = r->seq[id];
-
-			if (seq > ret) {
-				ret = seq;
-				rec = r;
-			}
-		}
-	}
-
-	show_record(id, rec);
-	return ret;
+    for (int i = 0; i < NR_RECORD_GROUPS; i++) {
+        if (record_tree_create(&record_status.record_groups[i].tree, record_node_compare))
+            log_err("failed to create");
+        record_lock_init(&record_status.record_groups[i].lock, NULL);
+    }
+    pthread_rwlock_init(&record_status.deliver_lock, NULL);
+    pthread_rwlock_init(&record_status.rwlock, NULL);
 }
