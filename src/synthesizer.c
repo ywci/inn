@@ -721,6 +721,7 @@ void *synth_queue_checker(void *arg)
             bool analysis = false;
 
             for (int id = 0; id < nr_nodes; id++) {
+                bool deliver = false;
                 struct list_head *pos;
                 struct list_head *head = &synth_status.pass[id];
                 struct list_head *candidates = &synth_status.candidates[id];
@@ -735,23 +736,25 @@ void *synth_queue_checker(void *arg)
                             rec->quorum++;
                             if (synth_can_deliver(rec)) {
                                 synth_deliver(rec);
+                                deliver = true;
                                 break;
                             }
                         }
                         if (is_empty(&rec->pass[id]))
                             break;
-                    } else
-                        break;
+                    }
                 }
-                if (!list_empty(head)) {
-                    record_t *rec = list_entry(head->prev, record_t, pass[id]);
+                if (!deliver) {
+                    if (!list_empty(head)) {
+                        record_t *rec = list_entry(head->prev, record_t, pass[id]);
 
-                    pos = rec->cand[id].next;
-                    head = head->prev;
-                    analysis = true;
-                } else
-                    pos = candidates->next;
-                synth_do_pass(id, head, pos, false);
+                        pos = rec->cand[id].next;
+                        head = head->prev;
+                        analysis = true;
+                    } else
+                        pos = candidates->next;
+                    synth_do_pass(id, head, pos, false);
+                }
                 synth_mutex_unlock();
             }
             if (analysis)

@@ -58,7 +58,7 @@
 // #define EVAL_ECHO
 // #define EVAL_DELAY
 
-#define FORWARD
+// #define FORWARD
 #define HEARTBEAT
 #define MULTICAST           MULTICAST_SUB
 
