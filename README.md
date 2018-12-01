@@ -1,6 +1,6 @@
-# Inn - Achieve Consensus By Inner-Order
+# Inn - Achieve Consensus By Inner Time
 
-# Quick Start
+## Quick Start
 ### 1. Build
 The build settings are contained in *conf/build.cfg*.
 * Run->*./build.sh*
@@ -11,11 +11,11 @@ The build settings are contained in *conf/build.cfg*.
 ### 3. Configure
 The configurations of Inn are contained in *conf/inn.yaml*.
 
-# Dependencies
+## Dependencies
 * zmq, czmq, aclocal, autoconf, autoheader, automake, autoreconf, libyaml
 
-# Version
-* Current version: 0.1.0
+## Version
+* Current version: 0.1.1
 
-# License
+## License
 The Inn is released under the terms of the MIT License.

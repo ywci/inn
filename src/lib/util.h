@@ -66,8 +66,10 @@ typedef struct __attribute__((__packed__)) {
 } while (0)
 
 hid_t get_hid();
+void check_settings();
 void init_func_timer();
 struct in_addr get_addr();
+int get_bits(uint64_t val);
 void publish(sender_desc_t *sender, zmsg_t *msg);
 uint64_t time_diff(timeval_t *start, timeval_t *end);
 void addr_convert(const char *protocol, char *dest, char *src, int port);

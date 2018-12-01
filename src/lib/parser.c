@@ -19,26 +19,27 @@
 #include <default.h>
 #include "log.h"
 
-bool quiet = true;
 int node_id = -1;
 int majority = -1;
 int nr_nodes = -1;
-
+int eval_intv = -1;
 int client_port = -1;
 int sampler_port = -1;
 int notifier_port = -1;
 int replayer_port = -1;
+int listener_port = -1;
 int collector_port = -1;
 int heartbeat_port = -1;
 int evaluator_port = -1;
 int synthesizer_port = -1;
 
+bool quiet = true;
+char log_name[1024];
 char iface[IFNAME_SIZE];
-char nodes[NODE_MAX][IPADDR_SIZE];
-
 bool alive_node[NODE_MAX];
 bitmap_t available_nodes = 0;
 bitmap_t node_mask[NODE_MAX];
+char nodes[NODE_MAX][IPADDR_SIZE];
 
 struct in_addr parser_get_ifaddr()
 {
@@ -121,6 +122,8 @@ int parser_get_ports(yaml_node_t *start, yaml_node_t *node)
             notifier_port = strtol(val_str, NULL, 10);
         } else if (!strcmp(key_str, "replayer")) {
             replayer_port = strtol(val_str, NULL, 10);
+        } else if (!strcmp(key_str, "listener")) {
+            listener_port = strtol(val_str, NULL, 10);
         } else if (!strcmp(key_str, "collector")) {
             collector_port = strtol(val_str, NULL, 10);
         } else if (!strcmp(key_str, "heartbeat")) {

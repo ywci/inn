@@ -24,6 +24,7 @@
 #if defined(QUIET) && !defined(DEBUG)
 #define log_is_valid() false
 #define log_enable() do {} while (0)
+#define log_disable() do {} while (0)
 #define log_func(...) do {} while (0)
 #define log_info(...) do {} while (0)
 #define log_debug(...) do {} while (0)
@@ -65,32 +66,15 @@
 #endif
 #endif
 
-#define log_result(hdr) do {                                           \
-    FILE *fp = fopen(PATH_RESULTS, "a+");                              \
-    fprintf(fp, "hid=%d, cnt=%d\n", (hdr)->hid, (hdr)->cnt);           \
-    fclose(fp);                                                        \
-} while (0)
-
-#define log_result_remove() do {                                       \
-    if (access(PATH_RESULTS, F_OK) != -1)                              \
-        remove(PATH_RESULTS);                                          \
-} while (0)
-
 #define log_file(fmt, ...) do {                                        \
-    FILE *fp = fopen(PATH_LOG, "w");                                   \
-    fprintf(fp, fmt "\n", ##__VA_ARGS__);                              \
-    fclose(fp);                                                        \
-} while (0)
-
-#define log_file_append(fmt, ...) do {                                 \
-    FILE *fp = fopen(PATH_LOG, "a+");                                  \
+    FILE *fp = fopen(log_name, "a+");                                  \
     fprintf(fp, fmt "\n", ##__VA_ARGS__);                              \
     fclose(fp);                                                        \
 } while (0)
 
 #define log_file_remove() do {                                         \
-    if (access(PATH_LOG, F_OK) != -1)                                  \
-        remove(PATH_LOG);                                              \
+    if (access(log_name, F_OK) != -1)                                  \
+        remove(log_name);                                              \
 } while (0)
 
 #define log_err(fmt, ...) do {                                         \

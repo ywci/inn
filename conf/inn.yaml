@@ -5,9 +5,10 @@ iface: eth0
 ports:
     client:      40010
     sampler:     40110
-    notifier:    40210
-    replayer:    40310
-    collector:   40410
-    heartbeat:   40510
-    evaluator:   40610
-    synthesizer: 40710
+    listener:    40210 # used by the evaluator
+    notifier:    40310
+    replayer:    40410
+    collector:   40510
+    heartbeat:   40610
+    evaluator:   40710 # used by the evaluator
+    synthesizer: 40810

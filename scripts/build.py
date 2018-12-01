@@ -1,6 +1,6 @@
 # build.py
 #
-# Copyright (C) 2017 Yi-Wei Ci
+# Copyright (C) 2018 Yi-Wei Ci
 #
 # Distributed under the terms of the MIT license.
 #
@@ -124,6 +124,7 @@ def _conf_proj():
     lines.append('AC_CONFIG_MACRO_DIR([m4])\n')
     lines.append('LT_INIT\n')
     lines.append('AC_PROG_CC\n')
+    lines.append('AC_PROG_RANLIB\n')
     if LIBS:
         lines.append('AC_CHECK_LIB([%s])\n' % ' '.join(LIBS))
     lines.append('AM_INIT_AUTOMAKE([foreign subdir-objects -Werror])\n')
@@ -195,7 +196,7 @@ def _read_args():
             res = i.split('=')
             if len(res) != 2:
                 raise Exception('Error: failed to parse %s' % i)
-            key = res[0].lower()
+            key = res[0].upper()
             val = res[1].split('#')[0].strip()
             if key not in ARGS:
                 raise Exception('Error: cannot find the definition of %s' % key)

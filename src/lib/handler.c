@@ -6,9 +6,13 @@
  */
 
 #include "handler.h"
-#include "call.h"
+#include "callback.h"
+#include "evaluator.h"
 
 void handle(char *buf, size_t size)
 {
-    call(buf, size);
+#ifdef EVALUATE
+    evaluate(buf, size);
+#endif
+    callback(buf, size);
 }

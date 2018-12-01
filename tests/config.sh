@@ -11,6 +11,12 @@ CWD=`dirname "$FILE"`
 HOME=`dirname "$CWD"`
 CONF=$CWD/conf.h
 if [ ! -e "$CONF" ]; then
-    cp "$HOME/include/conf.h" "$HOME/tests"
+    source "$HOME/conf/build.cfg"
     echo "#define IFACE \"$IFACE\"">>"$HOME/tests/conf.h"
+    if [ "$CLONE_TS" = "1" ]; then
+        echo "#define CLONE_TS">>"$HOME/tests/conf.h"
+    fi
+    if [ "$COUNTABLE" = "1" ]; then
+        echo "#define COUNTABLE">>"$HOME/tests/conf.h"
+    fi
 fi

@@ -12,7 +12,7 @@ typedef struct {
 #define get_hdr(msg) ((hdr_t *)zframe_data(zmsg_last(msg)))
 #define get_ts(msg) ((timestamp_t *)zframe_data(zmsg_last(msg)))
 
-#ifdef CONTABLE
+#ifdef COUNTABLE
 #define ts2hdr(ts, hdr) do {          \
     memset(hdr, 0, sizeof(hdr_t));    \
     hdr->hid = ts->hid;               \

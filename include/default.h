@@ -1,13 +1,11 @@
 #ifndef _DEFAULT_H
 #define _DEFAULT_H
 
-#include <conf.h>
 #include <czmq.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "rbtree.h"
 
-// #define QUIET                // no logging
 // #define VERIFY               // check if the program order is followed
 #define QUIET_AFTER_RESUME
 
@@ -22,7 +20,6 @@
 #define CRASH_DEBUG
 #define CRASH_NODES          2
 #define CRASH_AFTER_N_REQ    1024
-
 // #define CRASH_DETAILS
 // #define CRASH_AFTER_RESUME
 // #define CRASH_BEFORE_SUSPEND
@@ -50,21 +47,17 @@
 #define SHOW_HEARTBEAT
 #define SHOW_COLLECTOR
 #define SHOW_PROVIDERS
-
 // #define SHOW_ANALYSIS
 // #define SHOW_PROGRESS
 
-// #define EVAL_SAVE
-// #define EVAL_ECHO
-// #define EVAL_DELAY
-
-// #define FORWARD
+#define EVAL_SMPL           0              // (63/127/255 ...)
+#define EVAL_INTV           100000         // perform evaluation after EVAL_INTV requests
+#define MULTICAST           MULTICAST_SUB  // (MULTICAST_PUB/MULTICAST_SUB ...)
 #define HEARTBEAT
-#define MULTICAST           MULTICAST_SUB
+#define FORWARD
 
 #define NODE_MAX            7              // total servers
-#define STAT_INTV           10000          // msg
-#define HIGH_WATER_MARK     1000000        // msg
+#define HIGH_WATER_MARK     1000000        // requests
 #define DELIVER_TIMEOUT     1000000        // nsec
 
 #define ADDR_SIZE           128
@@ -73,7 +66,6 @@
 
 #define PATH_LOG            "log"
 #define PATH_CONF           "conf/inn.yaml"
-#define PATH_RESULTS        "results"
 
 #define INN_ADDR            "ipc:///tmp/inn"
 #define CLIENT_ADDR         "ipc:///tmp/inncli"
@@ -129,7 +121,7 @@ extern bool quiet;
 extern int node_id;
 extern int majority;
 extern int nr_nodes;
-extern int nr_requests;
+extern int eval_intv;
 extern int vector_size;
 extern bitmap_t available_nodes;
 
@@ -138,11 +130,13 @@ extern int sampler_port;
 extern int recovery_port;
 extern int notifier_port;
 extern int replayer_port;
+extern int listener_port;
 extern int collector_port;
 extern int heartbeat_port;
 extern int evaluator_port;
 extern int synthesizer_port;
 
+extern char log_name[1024];
 extern char iface[IFNAME_SIZE];
 extern bool alive_node[NODE_MAX];
 extern bitmap_t node_mask[NODE_MAX];

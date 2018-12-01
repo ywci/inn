@@ -11,81 +11,19 @@
 #include "subscriber.h"
 
 #if defined(EVALUATE) && defined(EVAL_ECHO)
+#define CLI_EVAL
+#endif
+
+#ifdef CLI_EVAL
+#include "verify.h"
 #include "evaluator.h"
 
-#define client_tree_create rb_tree_new
-#define client_node_lookup rb_tree_find
-#define client_node_insert rb_tree_insert
-#define client_node_remove rb_tree_remove
-#define client_lock_init pthread_mutex_init
-
-typedef rbtree_t client_tree_t;
-typedef rbtree_node_t client_node_t;
-typedef pthread_mutex_t client_lock_t;
-
-typedef struct {
-    int id;
-    hdr_t hdr;
-    client_node_t node;
-} client_record_t;
-
 struct {
+    int cnt;
     bool init;
-    int snd_id;
-    int rcv_id;
-    int updates;
-    uint64_t delay;
     timeval_t start;
-    client_tree_t tree;
-    client_lock_t lock;
+    uint64_t latency;
 } client_status;
-
-int client_node_compare(const void *h1, const void *h2)
-{
-    assert(h1 && h2);
-    return memcmp(h1, h2, sizeof(hdr_t));
-}
-
-
-void client_lock()
-{
-    pthread_mutex_lock(&client_status.lock);
-}
-
-
-void client_unlock()
-{
-    pthread_mutex_unlock(&client_status.lock);
-}
-
-
-inline client_record_t *client_lookup(client_tree_t *tree, hdr_t *hdr)
-{
-    client_node_t *node = NULL;
-
-    if (!client_node_lookup(tree, hdr, &node))
-        return tree_entry(node, client_record_t, node);
-    else
-        return NULL;
-}
-
-
-void client_add_record(zmsg_t *msg)
-{
-    client_record_t *rec = calloc(1, sizeof(client_record_t));
-
-    assert(rec);
-    rec->hdr = *get_hdr(msg);
-    rec->id = client_status.snd_id;
-    client_status.snd_id++;
-    client_lock();
-    if (client_node_insert(&client_status.tree, &rec->hdr, &rec->node)) {
-        log_err("failed to add record");
-        assert(0);
-    }
-    client_unlock();
-}
-
 
 void client_connect_evaluator()
 {
@@ -106,6 +44,7 @@ void client_connect_evaluator()
 
 void *client_start_listener(void *arg)
 {
+    int ret;
     void *socket;
     void *context;
     char addr[ADDR_SIZE];
@@ -117,53 +56,40 @@ void *client_start_listener(void *arg)
 #ifdef HIGH_WATER_MARK
     zmq_setsockopt(socket, ZMQ_RCVHWM, &hwm, sizeof(hwm));
 #endif
-    tcpaddr(addr, inet_ntoa(get_addr()), evaluator_port);
-    if (zmq_bind(socket, addr)) {
-        log_err("failed to start listener");
+    tcpaddr(addr, inet_ntoa(get_addr()), listener_port);
+    ret = zmq_bind(socket, addr);
+    if (ret) {
+        log_err("failed to start listener, addr=%s, port=%d", inet_ntoa(get_addr()), listener_port);
         return NULL;
     }
-
     while (true) {
-        int id = -1;
-        client_record_t *rec;
+        timeval_t now;
         zmsg_t *msg = zmsg_recv(socket);
         hdr_t *hdr = get_hdr(msg);
 
-        client_lock();
-        rec = client_lookup(&client_status.tree, hdr);
-        if (rec) {
-            id = rec->id;
-            client_node_remove(&client_status.tree, &rec->node);
+        get_time(now);
+        if ((hdr->cnt & EVAL_SMPL) == EVAL_SMPL) {
+            client_status.cnt++;
+            client_status.latency += time_diff(&hdr->t, &now);
         }
-        client_unlock();
-        log_debug("client: record => %d", hdr->cnt);
+        if (hdr->cnt == eval_intv - 1) {
+            float cps; // (cmd/sec)
+            float latency;
+
+            cps = (hdr->cnt + 1) / (time_diff(&client_status.start, &now) / 1000000.0);
+            latency = client_status.latency / (float)client_status.cnt / 1000000.0;
+            show_result("latency=%f (sec), cps=%f", latency, cps);
+#ifdef EVAL_THROUGHPUT
+#ifdef EVAL_LATENCY
+            log_file("latency=%f, cps=%f", latency, cps);
+#else
+            log_file("cps=%f", cps);
+#endif
+#elif defined(EVAL_LATENCY)
+            log_file("latency=%f", latency);
+#endif
+        }
         zmsg_destroy(&msg);
-        if (rec) {
-            timeval_t t;
-            timeval_t now;
-
-            if (!client_status.init) {
-                get_time(client_status.start);
-                client_status.init = true;
-            }
-            get_time(now);
-            assert(id == client_status.rcv_id);
-            client_status.rcv_id++;
-            client_status.updates++;
-            client_status.delay += time_diff(&hdr->t, &now);
-            if (client_status.updates == STAT_INTV) {
-                float cps; // command per second
-                float delay;
-
-                client_status.updates = 0;
-                cps = client_status.rcv_id / (time_diff(&client_status.start, &now) / 1000000.0);
-                delay = client_status.delay / (float)client_status.rcv_id;
-                show_result("delay=%f, cps=%f", delay, cps);
-                log_file("delay=%f, cps=%f", delay, cps);
-            }
-            free(rec);
-        } else
-            log_err("failed to find record");
     }
 }
 
@@ -173,6 +99,7 @@ void client_create_listener()
     pthread_t thread;
     pthread_attr_t attr;
 
+    log_file_remove();
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
@@ -189,7 +116,7 @@ static inline zmsg_t *client_add_timestamp(zmsg_t *msg)
     static bool init = false;
     static timestamp_t timestamp;
     timestamp_t *ptimestamp = &timestamp;
-#ifdef CONTABLE
+#ifdef COUNTABLE
     static uint32_t count = 0;
     static uint32_t sec = 0;
 #else
@@ -199,7 +126,7 @@ static inline zmsg_t *client_add_timestamp(zmsg_t *msg)
         timestamp.hid = get_hid();
         init = true;
     }
-#ifdef CONTABLE
+#ifdef COUNTABLE
     get_time(curr);
     sec = curr.tv_sec;
     count++;
@@ -213,8 +140,11 @@ static inline zmsg_t *client_add_timestamp(zmsg_t *msg)
 #endif
     frame = zframe_new(ptimestamp, sizeof(timestamp_t));
     zmsg_prepend(msg, &frame);
-#if defined(EVALUATE) && defined(EVAL_ECHO)
-    client_add_record(msg);
+#ifdef CLI_EVAL
+    if (!client_status.init) {
+        get_time(client_status.start);
+        client_status.init = true;
+    }
 #endif
     return msg;
 }
@@ -273,14 +203,9 @@ int client_create()
     pthread_create(&thread, &attr, publisher_start, arg);
     pthread_attr_destroy(&attr);
 
-#if defined(EVALUATE) && defined(EVAL_ECHO)
-    client_status.snd_id = 0;
-    client_status.rcv_id = 0;
-    client_status.updates = 0;
+#ifdef CLI_EVAL
+    client_status.cnt = 0;
     client_status.init = false;
-    if (client_tree_create(&client_status.tree, client_node_compare))
-        log_err("failed to create");
-    client_lock_init(&client_status.lock, NULL);
     client_create_listener();
     client_connect_evaluator();
 #endif

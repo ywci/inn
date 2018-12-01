@@ -5,7 +5,6 @@
  * Distributed under the terms of the MIT license.
  */
 
-
 #include "evaluator.h"
 #include "verify.h"
 
@@ -18,6 +17,7 @@ typedef rbtree_node_t eval_node_t;
 #define eval_node_insert rb_tree_insert
 
 typedef struct {
+    int cnt;
     hid_t hid;
     void *desc;
     eval_node_t node;
@@ -32,8 +32,8 @@ struct {
     hid_t hid;
     bool init;
     int updates;
-    uint64_t delay;
     timeval_t start;
+    uint64_t latency;
 #endif
 } eval_status;
 
@@ -70,15 +70,17 @@ void eval_response(char *buf, size_t size)
     assert(size >= sizeof(hdr_t));
 
     if (node_id == get_evaluator(hdr->hid)) {
-        zmsg_t *msg;
-        zframe_t *frame;
         eval_record_t *rec = eval_lookup(&eval_status.tree, (void *)&hdr->hid);
 
-        assert(rec);
-        msg = zmsg_new();
-        frame = zframe_new(buf, sizeof(hdr_t));
-        zmsg_append(msg, &frame);
-        zmsg_send(&msg, rec->desc);
+        assert(hdr->cnt == rec->cnt);
+        if (((rec->cnt & EVAL_SMPL) == EVAL_SMPL) || (rec->cnt == eval_intv - 1)) {
+            zmsg_t *msg = zmsg_new();
+            zframe_t *frame = zframe_new(buf, sizeof(hdr_t));
+
+            zmsg_append(msg, &frame);
+            zmsg_send(&msg, rec->desc);
+        }
+        rec->cnt++;
     }
 }
 
@@ -97,7 +99,8 @@ rep_t eval_responder(req_t req)
     assert(rec);
     context = zmq_ctx_new();
     memcpy(&addr, &req, sizeof(struct in_addr));
-    tcpaddr(dest, inet_ntoa(addr), evaluator_port);
+    tcpaddr(dest, inet_ntoa(addr), listener_port);
+    rec->cnt = 0;
     rec->hid = addr2hid(addr);
     rec->desc = zmq_socket(context, ZMQ_PUSH);
 #ifdef HIGH_WATER_MARK
@@ -147,46 +150,49 @@ void eval_handle(char *buf, size_t size)
     assert(size >= sizeof(timestamp_t));
     ts2hdr(ts, hdr);
 #endif
-
 #ifdef VERIFY
     verify_output(hdr);
 #endif
-#ifdef EVAL_DELAY
-    if (hdr->hid == eval_status.hid)
-#endif
-    {
+    if (!eval_status.init) {
+        get_time(eval_status.start);
+        eval_status.init = true;
+    }
+#ifdef EVAL_LATENCY
+    if ((hdr->hid == eval_status.hid) && ((eval_status.updates & EVAL_SMPL) == EVAL_SMPL)) {
         timeval_t now;
 
         get_time(now);
-        if (!eval_status.init) {
-#ifndef EVAL_DELAY
-            eval_status.start = now;
-#else
-            eval_status.start = hdr->t;
-#endif
-            eval_status.init = true;
-        }
+        eval_status.latency += time_diff(&hdr->t, &now);
         eval_status.cnt++;
-        eval_status.updates++;
-#ifdef EVAL_DELAY
-        eval_status.delay += time_diff(&hdr->t, &now);
-#endif
-        if (eval_status.updates == STAT_INTV) {
-            float cps; // command per second
-            float delay;
-#ifndef EVAL_DELAY
-            eval_status.cnt -= 1;
-#endif
-            eval_status.updates = 0;
-            cps = eval_status.cnt / (time_diff(&eval_status.start, &now) / 1000000.0);
-            delay = eval_status.delay / (float)eval_status.cnt;
-            show_result("delay=%f, cps=%f", delay, cps);
-            log_file("delay=%f, cps=%f", delay, cps);
-        }
     }
-#ifdef EVAL_SAVE
-    log_result(hdr);
 #endif
+    if (eval_status.updates == eval_intv - 1) {
+        float cps; // (cmd/sec)
+        float latency;
+        timeval_t now;
+
+        get_time(now);
+        cps = eval_intv / (time_diff(&eval_status.start, &now) / 1000000.0);
+        latency = eval_status.latency / (float)eval_status.cnt / 1000000.0;
+        show_result("latency=%f (sec), cps=%f", latency, cps);
+        eval_status.init = false;
+        eval_status.updates = 0;
+#ifdef EVAL_LATENCY
+        eval_status.latency = 0;
+        eval_status.cnt = 0;
+#endif
+
+#ifdef EVAL_THROUGHPUT
+#ifdef EVAL_LATENCY
+        log_file("latency=%f, cps=%f", latency, cps);
+#else
+        log_file("cps=%f", cps);
+#endif
+#elif defined(EVAL_LATENCY)
+        log_file("latency=%f", latency);
+#endif
+    } else
+        eval_status.updates++;
 }
 #endif
 
@@ -204,7 +210,6 @@ void evaluate(char *buf, size_t size)
 void eval_create()
 {
     log_file_remove();
-    log_result_remove();
 #ifdef VERIFY
     verify_init();
 #endif
@@ -215,7 +220,7 @@ void eval_create()
         log_err("failed to create");
 #else
     eval_status.cnt = 0;
-    eval_status.delay = 0;
+    eval_status.latency = 0;
     eval_status.updates = 0;
     eval_status.init = false;
     eval_status.hid = get_hid();

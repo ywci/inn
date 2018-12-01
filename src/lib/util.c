@@ -231,3 +231,25 @@ void func_timer_stop(const char *func_name)
     }
     func_timer_unlock();
 }
+
+
+int get_bits(uint64_t val)
+{
+    int cnt = 0;
+
+    while (val != 0) {
+        val >>= 1;
+        cnt++;
+    }
+    return cnt;
+}
+
+
+void check_settings()
+{
+    if (EVAL_SMPL && (get_bits(EVAL_SMPL) + 1 != get_bits(EVAL_SMPL + 1)))
+        log_err("invalid setting of EVAL_SMPL, EVAL_SMPL=%d", EVAL_SMPL);
+
+    if (EVAL_SMPL && (EVAL_INTV <= EVAL_SMPL))
+        log_err("invalid setting of EVAL_INTV, EVAL_INTV=%d", EVAL_INTV);
+}

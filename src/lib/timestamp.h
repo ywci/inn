@@ -3,7 +3,7 @@
 
 #include <default.h>
 
-#ifdef CONTABLE
+#ifdef COUNTABLE
 #define timestamp_set(timestamp, second, cnt) do { \
     timestamp->sec = second; \
     timestamp->usec = cnt; \

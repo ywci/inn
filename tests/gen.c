@@ -6,7 +6,7 @@
 #define GEN_CLI_MAX 16
 #define GEN_CLI_NET "192.168.1."
 
-#ifdef CONTABLE
+#ifdef COUNTABLE
 #define timestamp_set(timestamp, second, cnt) do { \
     timestamp->sec = second;                       \
     timestamp->usec = cnt;                         \
@@ -20,7 +20,7 @@
 
 struct {
     hid_t hid[GEN_CLI_MAX];
-#ifndef CONTABLE
+#ifndef COUNTABLE
     timeval_t t[GEN_CLI_MAX];
 #else
     uint32_t sec[GEN_CLI_MAX];
@@ -53,7 +53,7 @@ void gen_ts(timestamp_t *timestamp)
     int n = rand() % GEN_CLI_MAX;
 
     timestamp->hid = gen_status.hid[n];
-#ifdef CONTABLE
+#ifdef COUNTABLE
     get_time(curr);
     gen_status.sec[n] = curr.tv_sec;
     gen_status.count[n]++;

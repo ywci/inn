@@ -22,7 +22,7 @@
 #define BATCH_CLEAN_INTV    EV_NOTIMEOUT
 
 #define BATCH_NR_TIMESTAMPS (BATCH_MAX + 10000)
-#if defined(VERIFY) && defined(CONTABLE) && defined(VERIFY_TIMESTAMP)
+#if defined(VERIFY) && defined(COUNTABLE) && defined(VERIFY_TIMESTAMP)
 #define BATCH_VERIFY_TIMESTAMP
 #endif
 
